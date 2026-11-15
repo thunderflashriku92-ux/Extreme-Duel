@@ -6095,7 +6095,7 @@ class Fighter {
     if (this.id === 'zygarde' && !this.complete && !this.mega && this.state !== 'faint' && this.hp > 0 && this.hp < this.maxHp * 0.5 && game.mode === 'battle' && trainerAvOf(this) === 'ash-kalos') powerConstruct(this);   /* Power Construct: Ash (Kalos) only */
     if (this.id === 'greninja' && !this.bonded && !this.dmax && this.state !== 'faint' && this.hp > 0 && this.hp < this.maxHp * 0.5 && game.mode === 'battle' && trainerAvOf(this) === 'ash-kalos') battleBond(this);   /* Battle Bond */
     if (this.mixer) this.mixer.update(dt);
-    if (this.slam) { slamFighterTick(this, dt); return; }
+    if (this.slam) { this._inp = inp; slamFighterTick(this, dt); return; }
     if (this.dig) { digFighterTick(this, dt, inp, foe); return; }   /* Dig: dive / underground / burst */
     if (this.cdPause > 0) this.cdPause -= dt;   /* Thunder Fang: cooldowns held for 1 s after the drop */
     if (!inClash(this) && !(this.cdPause > 0)) for (let i = 0; i < 4; i++) this.cds[i] = Math.max(0, this.cds[i] - dt);   /* cooldowns freeze while locked in a clash */
@@ -8072,6 +8072,15 @@ function updateFx(dt) {
     const e = game.fx[i]; e.life -= dt; withBlue(!!e.blue, () => e.upd(clamp(1 - e.life / e.max, 0, 1), dt), e.bluePal);
     if (e.life <= 0) { if (e.obj) { scene.remove(e.obj); if (e.obj.material) e.obj.material.dispose(); } if (e.mats) e.mats.forEach(x => x.dispose()); if (e.geo) e.geo.dispose(); if (e.tex) e.tex.dispose(); game.fx.splice(i, 1); }
   }
+  /* Battle Royale: too many live effects -> end the ones farthest from you first (long-lived zones / auras are left alone) */
+  try {
+    if (game.player && typeof rbOn === 'function' && rbOn() && game.fx.length > FXBUD.cap * 1.3) {
+      const pp = game.player.pos, cand = [];
+      for (const e of game.fx) { if (e.run || e.life > 4 || e.life <= 0 || !e.obj || !e.obj.position) continue; const dx = e.obj.position.x - pp.x, dz = e.obj.position.z - pp.z; cand.push([dx * dx + dz * dz, e]); }
+      cand.sort((a, b) => b[0] - a[0]);
+      for (let k = 0, over = game.fx.length - FXBUD.cap; k < cand.length && over > 0; k++, over--) cand[k][1].life = 0;
+    }
+  } catch (er) {}
 }
 function burst(p, c0, c1, n, sp) { for (let k = 0; k < n; k++) { const a = rand(0, TAU); glowP.emit({ x:p.x, y:p.y, z:p.z, vx:Math.sin(a) * sp * rand(0.4, 1), vy:rand(-0.5, 1) * sp, vz:Math.cos(a) * sp * rand(0.4, 1), drag:4, life:rand(0.2, 0.4), s0:0.45, s1:0.05, c0, c1 }); } }
 function dust(p, n) { for (let k = 0; k < n; k++) { const a = rand(0, TAU); smokeP.emit({ x:p.x, y:0.15, z:p.z, vx:Math.sin(a) * 2, vy:0.6, vz:Math.cos(a) * 2, drag:3, life:0.5, s0:0.5, s1:1.2, c0:'#8a8f94', c1:'#6a6f74', a:0.4 }); } }
@@ -8107,15 +8116,25 @@ const beamTex = ctex('beam', 64, 256, g => {
   for (let i = 0; i < 260; i++) { const x = Math.random() * 64, y = Math.random() * 256, l = rand(12, 70); g.strokeStyle = `rgba(255,255,255,${rand(0.3, 1)})`; g.lineWidth = rand(1, 3); g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + l); g.stroke(); g.beginPath(); g.moveTo(x, y - 256); g.lineTo(x, y - 256 + l); g.stroke(); }
 }, true);
 function kick(shake, fov, ab) { if (typeof rbShakeOK === 'function' && !rbShakeOK()) return; game.shake = Math.max(game.shake, shake); game.fovKick = Math.max(game.fovKick || 0, fov); game.ab = Math.max(game.ab || 0, ab); }
+/* ===== Battle Royale effect budget: effects far from you are skipped, and when too many are alive the rest are thinned out ===== */
+const FXBUD = { cap:90, soft:0.6, near:7 };
+function fxCrowded(pos) {
+  if (!pos || !game.player || typeof rbOn !== 'function' || !rbOn()) return false;
+  if (!rbNear(pos.x, pos.z, RB_FX_R + 4)) return true;                       /* out of sight range */
+  const n = game.fx.length; if (n < FXBUD.cap * FXBUD.soft) return false;
+  const p = game.player.pos, d2 = (pos.x - p.x) * (pos.x - p.x) + (pos.z - p.z) * (pos.z - p.z);
+  if (d2 < FXBUD.near * FXBUD.near) return n > FXBUD.cap * 1.6;               /* your own area: only a runaway pile is cut */
+  return n > FXBUD.cap || Math.random() < 0.5;                                /* other players' fights: thinned, then dropped */
+}
 function fxSprite(tex, color, pos, s0, s1, life, o = {}) {
-  if (FX_FAR) return;
+  if (FX_FAR) return; if (fxCrowded(pos)) return;
   const mat = new THREE.SpriteMaterial({ map:tex, color, transparent:true, depthWrite:false, blending:o.normal ? THREE.NormalBlending : fxBlend(), opacity:o.op || 1, rotation:o.rot != null ? o.rot : rand(0, TAU) });
   const sp = new THREE.Sprite(mat); sp.position.copy(pos); sp.scale.setScalar(s0); scene.add(sp);
   game.fx.push({ life, max:life, obj:sp, upd:(t, dt) => { const k = o.ease ? 1 - Math.pow(1 - t, 3) : t; sp.scale.setScalar(s0 + (s1 - s0) * k); mat.opacity = (o.op || 1) * (1 - t); if (o.spin) mat.rotation += o.spin * (dt || 0); } });
   return sp;
 }
 function shockRing(pos, color, r, life = 0.4, op = 0.9) {
-  if (FX_FAR) return;
+  if (FX_FAR) return; if (fxCrowded(pos)) return;
   const mat = new THREE.MeshBasicMaterial({ map:ringTex, color, transparent:true, depthWrite:false, blending:fxBlend(), opacity:op });
   const m = new THREE.Mesh(indGeo.circle, mat); m.position.set(pos.x, 0.07, pos.z); scene.add(m);
   game.fx.push({ life, max:life, obj:m, upd:t => { const k = 1 - Math.pow(1 - t, 2.5), s = 0.3 + r * k; m.scale.set(s, 1, s); mat.opacity = op * (1 - t); } });
@@ -18632,7 +18651,7 @@ function buildStruggleFx(S) {
   const core = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color:'#ffffff', transparent:true, opacity:0.5, depthWrite:false })); g.add(core);   /* calm: a soft glow, not a white-out */
   const halo = c => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:softTex, color:c, transparent:true, depthWrite:false, blending:fxBlend(), opacity:0.32 })); g.add(s); return s; };
   const ha = halo(pA.c1 || '#ffffff'), hc = halo(pC.c1 || '#ffffff');
-  const rings = [pA, pC].map((p, i) => { const m = new THREE.Mesh(new THREE.TorusGeometry(1, 0.035, 6, 40), new THREE.MeshBasicMaterial({ color:p.c0 || '#ffffff', transparent:true, opacity:0.45, depthWrite:false })); m.rotation.x = 0.9 + i * 0.6; g.add(m); return m; });
+  const rings = [pA, pC].map((p, i) => { const m = new THREE.Mesh(new THREE.TorusGeometry(1, 0.035, 6, 40), new THREE.MeshBasicMaterial({ color:p.c0 || '#ffffff', transparent:true, opacity:0.45, depthWrite:false })); m.rotation.x = 0.9 + i * 0.6; m.visible = false; g.add(m); return m; });   /* no rings round the beam clash */
   const col = (typeof TERR !== 'undefined' && TERR[curArena] && TERR[curArena].rock) || '#c9a779', pg = new THREE.DodecahedronGeometry(0.3), pm = new THREE.MeshLambertMaterial({ color:col }), peb = [];
   for (let i = 0; i < 8; i++) { const m = new THREE.Mesh(pg, pm); m.scale.setScalar(rand(0.5, 1.0)); scene.add(m); peb.push(m); }
   S.fx = { g, core, ha, hc, rings, peb, pg, pm };
@@ -18643,7 +18662,6 @@ function updateStruggleFx(S, dt) {
   F.rings.forEach((m, i) => { m.rotation.z += dt * (i ? -2.5 : 3); m.scale.setScalar(sz * 1.35); });
   F.peb.forEach((m, i) => { const a = i / F.peb.length * TAU + S.t * 0.8, r = 2.2 + sz * 0.7 + 0.15 * Math.sin(S.t * 5 + i * 1.7); m.position.set(p.x + Math.cos(a) * r, 0.15 + Math.max(0, Math.sin(S.t * 6 + i * 2.3)) * 0.25, p.z + Math.sin(a) * r); m.rotation.x += dt * 3; m.rotation.y += dt * 2; });
   game.lightReqs.push({ pos:p, color:'#ffffff', int:1.4 }); game.shake = Math.max(game.shake, 0.045);
-  S.ringT -= dt; if (S.ringT <= 0) { S.ringT = 1.0; shockRing(p, '#ffffff', 3 + 1.5 * k, 0.6, 0.25); }
   { const ln = $('#clashLines'); if (ln) ln.hidden = true; }   /* no spinning speed-line overlay: the beams' push stays easy to read */
   const hud = $('#clashHud'), pf = S.pl === 'C' ? 1 - S.push : S.push, mine = S.pl === 'C' ? [S.mC, S.mA] : [S.mA, S.mC];
   hud.hidden = false; hud.style.setProperty('--cl', TYPE_COLOR[mine[0].type] || '#4fc3ff'); hud.style.setProperty('--cr', TYPE_COLOR[mine[1].type] || '#ff5a5a');
@@ -19894,6 +19912,9 @@ function rbPerfTick(dt) {
   const crowd = game.fighters.filter(f => f && f !== p && !f.gone && f.state !== 'faint' && Math.hypot(f.pos.x - p.pos.x, f.pos.z - p.pos.z) < 20).length;
   PFX_SKIP = crowd >= 4 ? 0.65 : crowd >= 3 ? 0.5 : crowd >= 2 ? 0.3 : crowd >= 1 ? 0.15 : 0;
   RB_LITE = crowd >= 2;
+  /* crowded fight: shrink the effect budget and drop the render resolution one or two steps early, before the frame rate collapses */
+  FXBUD.cap = crowd >= 5 ? 50 : crowd >= 4 ? 60 : crowd >= 3 ? 75 : 90;
+  if (typeof rbOn === 'function' && rbOn()) { PG.base = crowd >= 5 ? 2 : crowd >= 3 ? 1 : 0; if (PG.level < PG.base) pgSet(PG.base); }
 }
 /* minimap: island, storm, safe zone, loot, you and nearby rivals */
 function royaleMapSetup() { let c = $('#rbMap'); if (!c) { c = document.createElement('canvas'); c.id = 'rbMap'; c.width = 220; c.height = 220; $('#hud').appendChild(c); } }
@@ -22931,12 +22952,12 @@ function skyClashFx(S) {
   const mkOrb = m => {
     const pal = PAL[m.type] || PAL.normal, g = new THREE.Group(); scene.add(g);
     const shell = new THREE.Mesh(sg, add(pal.c1 || '#ffffff', 0.26)), inner = new THREE.Mesh(sg, add(pal.core || '#ffffff', 0.34)); inner.scale.setScalar(0.72);
-    const r1 = new THREE.Mesh(tg, add(pal.c0 || '#ffffff', 0.4)), r2 = new THREE.Mesh(tg, add('#ffffff', 0.3)); r2.rotation.y = 1.2; g.add(shell, inner, r1, r2);
+    const r1 = new THREE.Mesh(tg, add(pal.c0 || '#ffffff', 0.4)), r2 = new THREE.Mesh(tg, add('#ffffff', 0.3)); r2.rotation.y = 1.2; r1.visible = r2.visible = false; g.add(shell, inner, r1, r2);
     return { g, shell, inner, r1, r2, core:spr(softTex, pal.core || '#ffffff', 0.4), glow:spr(softTex, pal.c1 || '#ffffff', 0.32), halo:spr(softTex, pal.c0 || '#ffffff', 0.18), star:spr(starTex, '#ffffff', 0.2), pal };
   };
   const orbs = [mkOrb(S.mA), mkOrb(S.mB)];
   const core = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ color:'#ffffff', transparent:true, opacity:0.45, depthWrite:false })); G.add(core);
-  const disc = new THREE.Mesh(new THREE.RingGeometry(0.55, 1, 56), add('#ffffff', 0.35)), disc2 = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.5, 56), add('#bfefff', 0.25)); G.add(disc, disc2);
+  const disc = new THREE.Mesh(new THREE.RingGeometry(0.55, 1, 56), add('#ffffff', 0.35)), disc2 = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.5, 56), add('#bfefff', 0.25)); disc.visible = disc2.visible = false; G.add(disc, disc2);   /* no circle / ring in the middle of the charge clash */
   S.fx = { G, orbs, core, disc, disc2, sg, tg, UPZ, pals:[orbs[0].pal, orbs[1].pal] };
 }
 function skyClashStart(A, B) {
@@ -22984,8 +23005,7 @@ function skyClashUpdate(S, dt) {
   S.arcT -= dt; if (S.arcT <= 0) { S.arcT = 0.4; try { const d = rand(2.5, 5.5); lightning(pt, pt.clone().addScaledVector(e1, rand(-1, 1) * d).addScaledVector(e2, rand(-1, 1) * d).addScaledVector(u, rand(-1, 1) * 2), '#ffffff', 0.07, 0.12, 1); } catch (e) {} }
   if (ta + tb > 0) { try { kick(0.04, 1, 0.1); } catch (e) {} for (let q = 0; q < 2; q++) { const a = rand(0, TAU), sp = rand(5, 10), v = e1.clone().multiplyScalar(Math.cos(a)).addScaledVector(e2, Math.sin(a)); try { glowP.emit({ x:pt.x, y:pt.y, z:pt.z, vx:v.x * sp, vy:v.y * sp, vz:v.z * sp, life:0.3, s0:0.5, s1:0.05, c0:'#ffffff', c1:'#ffffff', a:1 }); } catch (e) {} } }
   game.lightReqs && game.lightReqs.push({ pos:pt, color:'#ffffff', int:1.5 }); game.shake = Math.max(game.shake, 0.04 + 0.05 * tens);
-  S.ringT -= dt; if (S.ringT <= 0) { S.ringT = 1.0; try { shockRing(pt, '#ffffff', 3 + 1.5 * kk + (rA + rB) * 0.2, 0.6, 0.25); } catch (e) {} }
-  try { const ln = $('#clashLines'); if (ln) ln.hidden = true;
+    try { const ln = $('#clashLines'); if (ln) ln.hidden = true;
     const hud = $('#clashHud'), pf = S.pl === 'B' ? 1 - S.push : S.push, mine = S.pl === 'B' ? [S.mB, S.mA] : [S.mA, S.mB];
     hud.hidden = false; hud.style.setProperty('--cl', TYPE_COLOR[mine[0].type] || '#4fc3ff'); hud.style.setProperty('--cr', TYPE_COLOR[mine[1].type] || '#ff5a5a');
     hud.querySelector('.l').style.width = pf * 100 + '%'; hud.querySelector('.r').style.width = (1 - pf) * 100 + '%'; hud.querySelector('.m').style.left = pf * 100 + '%'; hud.querySelector('span').textContent = S.pl ? 'CHARGE CLASH! MASH! TAP! TAP!' : 'CHARGE CLASH'; } catch (e) {}
@@ -23677,20 +23697,20 @@ function gTrails(S, c0a, c1a, c0d, c1d) { if (!S.trA) { S.trA = new Trail(c0a, c
 
 /* the finish: land the victim, shock rings, ground damage, real hit */
 function gImpact(S, o) {
-  if (PG.level >= 2) return;
+  const lite = PG.level >= 2;   /* lagging: skip only the landing effects, never the landing itself (returning here froze the grab mid-throw) */
   const A = S.A, D = S.D, m = S.m; let px = o.x != null ? o.x : S.x0, pz = o.z != null ? o.z : S.z0; { const R = (typeof ARENA_R !== 'undefined' ? ARENA_R : 30) - 1.5, dd = Math.hypot(px, pz); if (dd > R) { px *= R / dd; pz *= R / dd; } }
   const gh = groundHeight(px, pz, 0) || 0, p = AV(px, gh, pz), big = o.big != null ? o.big : 1;
   const m2 = Object.assign({}, m, { grab:false }), col = o.col || '#ffffff', col2 = o.col2 || col;
   D.pos.set(px, gh, pz); if (!o.keepA) A.pos.set(px - S.dx * 1.9, gh, pz - S.dz * 1.9);
   A.facing = Math.atan2(S.dx, S.dz); if (A.slam) A.slam.spin = 0; if (D.slam) D.slam.spin = 0; A.slam = D.slam = null; A.iframes = 0.45; D.iframes = 0; try { A.toIdle(); } catch (e) {}
-  try {
+  if (!lite) try {
     hitStop(0.06 + 0.12 * big, A, D); game.slowmo = Math.max(game.slowmo || 0, 0.15 + 0.4 * big); game.slowK = 0.3; flashScreen(0.25 + 0.35 * big); kick(0.6 + 1.3 * big, 8 + 8 * big, 1 + 2.4 * big); SFX.boom && SFX.boom(); SFX.hit(1);
     bigBoom(AV(p.x, p.y + 1, p.z), m.type, 3.5 + 3 * big); shockRing(p, '#ffffff', 6 + 6 * big, 0.5, 0.95); shockRing(p, col, 9 + 9 * big, 0.9, 0.8); shockRing(p, col2, 5, 0.35, 0.9);
     if (o.crater) { aCracks(p, { r:5 + 2.5 * big, n:12, glow:col, color:'#1a100a', life:3.4 }); later(0.1, () => aCracks(p, { r:3, n:10, glow:col2, color:'#120b07', life:3 })); }
     if (o.skid) for (let i = 0; i <= 8; i++) { const k = i / 8; later(0.03 * i, () => { dust(AV(o.skid.x + (px - o.skid.x) * k, 0, o.skid.z + (pz - o.skid.z) * k), 5); if (i % 2 === 0) typeBurst(m.type, AV(o.skid.x + (px - o.skid.x) * k, 0.4, o.skid.z + (pz - o.skid.z) * k), 4, 5); }); }
     dust(p, 12 + Math.round(18 * big)); typeBurst(m.type, AV(p.x, p.y + 0.6, p.z), 30, 12, 1.2); aColumn(p, col2, 8, 2, 0.6);
   } catch (e) { console.warn(e); }
-  if (o.crater) { try { slamDebris(p, 14 + Math.round(22 * big), big > 0.7); if (big > 0.7) slamShards(p); } catch (e) {} }
+  if (o.crater && !lite) { try { slamDebris(p, 14 + Math.round(22 * big), big > 0.7); if (big > 0.7) slamShards(p); } catch (e) {} }
   try { applyHit(A, D, m2); } catch (e) { console.warn(e); }
   for (const e of enemiesOf(A)) if (e !== D && !o.noSplash && Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < 5.5) try { applyHit(A, e, Object.assign({}, m2, { power:Math.round(m2.power * 0.5) })); } catch (x) {}
   if (D.state !== 'faint') { D.state = 'stun'; D.stateT = 1.1; D.vy = 6.5; D.onGround = false; try { D.anim.play(D.pick(['Hurt']), { loop:false }); } catch (e) {} }
@@ -24171,7 +24191,7 @@ MOVE_ANIM.stoneedge = { hit:() => {} };
    (so the circle can be dodged), with a small FOV kick so they can see the caster in the sky.
    ===================================================================================================== */
 const LEAPS = []; let LEAPC = null;
-const LEAP_CFG = { irontail:{ col:'#cfd8e3', col2:'#9fd2ff', R:4.2, ironTail:true }, dragontail:{ col:'#33ff88', col2:'#d0ffea', R:4.4, dragonTail:true }, bodyslam:{ col:'#ffd9a0', col2:'#ffffff', R:2.6, pin:true },   /* pin: small hop, lands ON the target and sits on it (see PIN block) */ bodypress:{ col:'#ff8a3c', col2:'#ffd9a0', R:4.2 } };
+const LEAP_CFG = { irontail:{ col:'#cfd8e3', col2:'#9fd2ff', R:4.2, ironTail:true }, dragontail:{ col:'#33ff88', col2:'#d0ffea', R:4.4, dragonTail:true }, bodyslam:{ col:'#ffd9a0', col2:'#ffffff', R:2.6, pin:true },   /* pin: small hop, lands ON the target and sits on it (see PIN block) */ bodypress:{ col:'#ff8a3c', col2:'#ffd9a0', R:4.2 }, flyingpress:{ col:'#ffb070', col2:'#d8ecff', R:3.8, fly:true } };
 /* ===== DRAGON TAIL · SHENRON TAIL (start) =====
    Dragon Tail keeps its move data and its leap flow (circle, run-up, leap, plunge, ONE hit at 1.0x on the slam frame); only the visuals changed:
    the TAIL HALF of the spectral Shenron (green body, gold belly plates, dark dorsal spines, tapering tip -- no head, no limbs) grows out of the user's back,
@@ -24370,6 +24390,7 @@ function leapImpact(L) {
   if (L.trail) L.trail.alive = false;
 }
 function leapStep(L, dt) {
+  if (L.cfg.fly) { leapStepFly(L, dt); return; }
   if (L.cfg.pin) { leapStepPin(L, dt); return; }
   const A = L.A, g = L.gh, d = L.dir, c = L.cen, H = 11, tJ = 0.55, tH = 0.2, tP = 0.22, tA = 0.85, T0 = L.tRun, T1 = T0 + tJ, T2 = T1 + tH, T3 = T2 + tP, lx = c.x - d.x * 0.8, lz = c.z - d.z * 0.8, col = L.cfg.col;
   L.t += dt; const t = L.t; A.facing = Math.atan2(d.x, d.z); if (A.slam) A.slam.spin = 0;
@@ -24438,6 +24459,51 @@ function leapStepPin(L, dt) {
   }
   { const h = Math.max(0, A.pos.y - g); L.shadow.position.set(A.pos.x, g + 0.07, A.pos.z); L.shadow.scale.setScalar(clamp(1.7 - h / 3, 0.5, 1.7)); L.sm.opacity = L.ph === 'after' ? 0 : 0.42; }
 }
+/* =====================================================================================================
+   FLYING PRESS (controllable): the Body Press leap, but at the top the user HOVERS, floating gently left and right while it sinks slowly.
+   The telegraphed circle DETACHES from the target and is steered by the player (stick / WASD) on the ground; the hovering user follows it from above.
+   Press Flying Press again to plunge and slam the circle.  The CPU steers the circle onto the foe by itself.  If nobody slams, it drops by itself after FPR.hold.
+   Tune: FPR.
+   ===================================================================================================== */
+const FPR = { hold:4.2, speed:9.5, reach:17, sway:1.6, minH:0.3, arm:0.35 };
+function leapStepFly(L, dt) {
+  const A = L.A, d = L.dir, H = 11, tJ = 0.55, T0 = L.tRun, T1 = T0 + tJ, col = L.cfg.col, tA = 0.85, rx = -d.z, rz = d.x;
+  if (!L.c0) L.c0 = L.cen.clone();
+  L.t += dt; const t = L.t; A.facing = Math.atan2(d.x, d.z); if (A.slam) A.slam.spin = 0;
+  const c0 = L.c0, lx0 = c0.x - d.x * 0.8, lz0 = c0.z - d.z * 0.8, g0 = L.gh0 != null ? L.gh0 : (L.gh0 = L.gh);
+  L.mk.ring.material.opacity = 0.7 + 0.3 * Math.sin(t * 22); L.mk.ring2.scale.setScalar(1 + 0.08 * Math.sin(t * 16)); L.mk.grp.rotation.y += dt * 0.6;
+  if (L.T === game.player && L.ph !== 'after') game.fovKick = Math.max(game.fovKick || 0, t > T0 ? 9 : 3);
+  if (t < T0) {
+    L.ph = 'run'; const k = t / T0, e = k * k * (3 - 2 * k); L.k = k; L.mk.fill.scale.setScalar(Math.max(0.03, k)); A.pos.set(L.p0.x + (L.p1.x - L.p0.x) * e, L.p0.y * (1 - k) + g0 * k, L.p0.z + (L.p1.z - L.p0.z) * e);
+    gOnce(L, 'run', () => { leapPlay(A, ['Walk', 'Run', 'Charge', 'Attack'], true); SFX.whoosh && SFX.whoosh(); }); if (Math.random() < 0.6) dust(A.pos, 1);
+  } else if (t < T1) {
+    L.ph = 'jump'; const k = (t - T0) / tJ, ye = 1 - Math.pow(1 - k, 2.2), he = gSmooth(k) * 0.72; L.k = k; L.mk.fill.scale.setScalar(1); A.pos.set(L.p1.x + (lx0 - L.p1.x) * he, g0 + H * ye, L.p1.z + (lz0 - L.p1.z) * he);
+    gOnce(L, 'jump', () => { leapPlay(A, ['Jump', 'Charge', 'Attack'], false); L.p1.copy(A.pos); L.p1.y = g0; shockRing(AV(A.pos.x, g0, A.pos.z), '#ffffff', 6, 0.4, 0.9); dust(A.pos, 22); aCracks(AV(A.pos.x, g0, A.pos.z), { r:2.6, n:7, glow:col, color:'#1a100a', life:2.2 }); kick(0.6, 6, 1.2); SFX.whoosh && SFX.whoosh(); L.trail = new Trail('#ffffff', col, 0.6, 26, true); });
+    gSpark(AV(A.pos.x, A.pos.y - 0.6, A.pos.z), '#ffffff', col, 2, 3, -4);
+  } else if (L.ph !== 'plunge' && !L.flags.hit) {
+    if (L.ph !== 'hover') { L.ph = 'hover'; L.hv = { t:0, x:A.pos.x, z:A.pos.z, y0:A.pos.y - g0 }; A.iframes = Math.max(A.iframes || 0, 0.4); leapPlay(A, ['Attack', 'Strike', 'Swing', 'Charge'], false); try { aRings(A.center(), '#ffffff', 3, 4, true); flashScreen(0.15); if (L.T !== A && A.isPlayer) floatText(A.center().clone().setY(A.pos.y + A.bodyH + 1.2), 'Steer the circle · press Flying Press again to slam!', 'info'); } catch (e) {} }
+    const hv = L.hv; hv.t += dt; L.k = Math.min(1, hv.t / FPR.hold); A.iframes = Math.max(A.iframes || 0, 0.25);
+    /* steer the detached circle */
+    const inp = A._inp || {}, human = !!A.isPlayer && !!A._inp && !game.ai2; let vx = 0, vz = 0, press = false;
+    if (human) { const sx = inp.sx || 0, sy = inp.sy || 0; vx = d.x * sy + rx * sx; vz = d.z * sy + rz * sx; if (hv.t > FPR.arm && inp.move >= 0 && A.moves && A.moves[inp.move] && A.moves[inp.move].key === L.m.key) press = true; }
+    else { let T = L.T, bd = 1e9; for (const e of enemiesOf(A)) { const dd = Math.hypot(e.pos.x - L.cen.x, e.pos.z - L.cen.z); if (dd < bd) { bd = dd; T = e; } } if (hv.t > 0.6 && T) { const dx = T.pos.x - L.cen.x, dz = T.pos.z - L.cen.z, dl = Math.hypot(dx, dz) || 1; vx = dx / dl * Math.min(1, dl / 2); vz = dz / dl * Math.min(1, dl / 2); if ((dl < 1.4 && hv.t > 1.0) || hv.t > 2.6) press = true; } }
+    L.cen.x += vx * FPR.speed * dt; L.cen.z += vz * FPR.speed * dt;
+    { const lim = (typeof ARENA_R !== 'undefined' ? ARENA_R : 30) - 2, dd = Math.hypot(L.cen.x, L.cen.z); if (dd > lim) { L.cen.x *= lim / dd; L.cen.z *= lim / dd; } const ox = L.cen.x - c0.x, oz = L.cen.z - c0.z, od = Math.hypot(ox, oz); if (od > FPR.reach) { L.cen.x = c0.x + ox / od * FPR.reach; L.cen.z = c0.z + oz / od * FPR.reach; } }
+    L.gh = groundHeight(L.cen.x, L.cen.z, 0) || 0; L.cen.y = L.gh; L.mk.grp.position.set(L.cen.x, L.gh, L.cen.z);
+    L.mk.fill.scale.setScalar(1 + 0.05 * Math.sin(hv.t * 9)); L.mk.ring.scale.setScalar(1 + 0.03 * Math.sin(hv.t * 7)); if (hv.t > FPR.hold * 0.7) L.mk.ring.material.opacity = 0.5 + 0.5 * Math.sin(hv.t * 30);   /* flickers when time is nearly up */
+    /* the user floats over it: swaying left and right, sinking slowly */
+    const e = L.k * L.k * (3 - 2 * L.k) * 0.5 + L.k * 0.5, hy = L.gh + (H + 0.3) - (H + 0.3 - Math.max(FPR.minH, 3.4)) * e + Math.sin(hv.t * 3.2) * 0.25, sway = Math.sin(hv.t * 1.9) * FPR.sway, tx = L.cen.x - d.x * 0.8 + rx * sway, tz = L.cen.z - d.z * 0.8 + rz * sway, kk = Math.min(1, dt * 2.6);
+    A.pos.set(A.pos.x + (tx - A.pos.x) * kk, hy, A.pos.z + (tz - A.pos.z) * kk);
+    if (Math.random() < dt * 14) gSpark(AV(A.pos.x, A.pos.y - 0.4, A.pos.z), '#ffffff', col, 1, 2, -2);
+    if (press || hv.t >= FPR.hold) { L.ph = 'plunge'; L.pl = { t:0, f:A.pos.clone(), dur:clamp((A.pos.y - L.gh) / 38, 0.16, 0.4) }; try { SFX.whoosh && SFX.whoosh(); shockRing(A.center(), '#ffffff', 5, 0.3, 0.9); } catch (x) {} }
+  } else if (L.ph === 'plunge' && !L.flags.hit) {
+    const P = L.pl; P.t += dt; const k = Math.min(1, P.t / P.dur), e = Math.pow(k, 2.2), lx = L.cen.x - d.x * 0.8, lz = L.cen.z - d.z * 0.8; L.k = k;
+    A.pos.set(P.f.x + (lx - P.f.x) * e, P.f.y + (L.gh - P.f.y) * e, P.f.z + (lz - P.f.z) * e); game.shake = Math.max(game.shake, 0.06 + 0.16 * e); gSpark(AV(A.pos.x, A.pos.y + 1.2, A.pos.z), '#ffffff', col, 5, 2, 8);
+    if (k >= 1) { L.flags.hit = true; L.ph = 'after'; L.t0 = t; L.k = 0; leapImpact(L); L.mk.grp.visible = false; }
+  } else { L.ph = 'after'; L.k = Math.min(1, (t - L.t0) / tA); if (L.k >= 1) L.done = true; }
+  if (L.trail && L.ph !== 'after') L.trail.push(A.center());
+  { const h = Math.max(0, A.pos.y - L.gh); L.shadow.position.set(A.pos.x, L.gh + 0.07, A.pos.z); L.shadow.scale.setScalar(clamp(1.7 - h / 9, 0.35, 1.7)); L.sm.opacity = 0.42 * (L.ph === 'after' ? 0 : 1); }
+}
 function leapPass(dt) {
   if (!LEAPS.length) { LEAPC = null; return; }
   if (game.mode === 'paused') return;
@@ -24454,6 +24520,7 @@ function leapCamera(dt) {
   let px, py, pz, lx, ly, lz, fov = 0, rate = 12;
   if (ph === 'run') { const back = 3.4 - 0.9 * k; px = ax - d.x * back; pz = az - d.z * back; py = g + 1.7; lx = ax + d.x * 4; lz = az + d.z * 4; ly = g + 1.2; fov = 8 + 6 * k; }
   else if (ph === 'jump') { const e = gSmooth(k), fx = ax + d.x * 4, fz = az + d.z * 4; px = ax - d.x * 3.6; pz = az - d.z * 3.6; py = ay * 0.8 + 1.5; lx = fx + (c.x - fx) * e; lz = fz + (c.z - fz) * e; ly = (ay + 1) + (g + 0.3 - (ay + 1)) * e; fov = 14 + 8 * e; }
+  else if (ph === 'hover' && L.cfg.fly) { px = c.x - d.x * 8.5; pz = c.z - d.z * 8.5; py = Math.max(ay + 3.2, g + 7); lx = c.x; lz = c.z; ly = g + 1.5; fov = 16; rate = 5; }
   else if (ph === 'hover') { px = ax - d.x * 3; pz = az - d.z * 3; py = ay + 1.8; lx = c.x; lz = c.z; ly = g + 0.3; fov = 24; rate = 9; }
   else if (ph === 'plunge') { px = ax - d.x * 3.2; pz = az - d.z * 3.2; py = ay + 2.2; lx = c.x; lz = c.z; ly = g + 0.4; fov = 24 + 8 * k; rate = 16; }
   else { px = c.x - d.x * (5 + 6 * k); pz = c.z - d.z * (5 + 6 * k); py = g + 3.6 + 2.4 * k; lx = c.x; lz = c.z; ly = g + 1; fov = 16 * (1 - k); rate = 5; }
@@ -24462,7 +24529,7 @@ function leapCamera(dt) {
   camera.lookAt(L.look);
 }
 (function () {
-  for (const k of ['bodyslam', 'bodypress', 'irontail']) {   /* Dragon Tail no longer leaps: LEAP_CFG.dragontail (+ the dragonTail rig flow) is kept as-is for the coming Iron Tail */
+  for (const k of ['bodyslam', 'bodypress', 'irontail', 'flyingpress']) {   /* Dragon Tail no longer leaps: LEAP_CFG.dragontail (+ the dragonTail rig flow) is kept as-is for the coming Iron Tail */
     if (!MOVES[k]) continue; Object.assign(MOVES[k], { leap:true, range:8.5, cd:10 });
     const prev = MOVE_ANIM[k] || {}, old = prev.cast, col = (LEAP_CFG[k] || {}).col || '#ffd9a0';
     MOVE_ANIM[k] = Object.assign({}, prev, { cast:f => { try { auraFx(f, col, 0.7, 2.2); aGather(f, col, 7, 20); } catch (e) {} if (old) old(f); } });
@@ -28371,6 +28438,18 @@ function pgWarm() {   /* prepare the special effect shaders once, and this battl
   try { const W = new THREE.Scene(), g = new THREE.PlaneGeometry(0.01, 0.01), add = m => { const ms = new THREE.Mesh(g, m); W.add(ms); return m; }, mats = [];
     const mk = (vs, fs, side) => { try { mats.push(add(new THREE.ShaderMaterial({ uniforms:{}, vertexShader:vs, fragmentShader:fs, transparent:true, depthWrite:false, side:side || THREE.FrontSide }))); } catch (e) {} };
     if (typeof FB_VS !== 'undefined') mk(FB_VS, FB_FS, THREE.DoubleSide); if (typeof SHEN_VS !== 'undefined') mk(SHEN_VS, SHEN_FS); if (typeof PD_VS !== 'undefined') mk(PD_VS, PD_FS); if (typeof IT_VS !== 'undefined') mk(IT_VS, IT_FS, THREE.DoubleSide);
+    /* every other effect shader too, so the first cast of any big move doesn't freeze the game while it compiles */
+    try {
+      const D = THREE.DoubleSide, L = [
+        typeof DFX_VS !== 'undefined' && typeof DFX_FS !== 'undefined' ? [DFX_VS, DFX_FS, D] : 0, typeof DTAIL_VS !== 'undefined' ? [DTAIL_VS, SHEN_FS, D] : 0,
+        typeof SCL_VS !== 'undefined' ? [SCL_VS, SCL_FS, D] : 0, typeof CLS_WAVE_VS !== 'undefined' ? [CLS_WAVE_VS, CLS_WAVE_FS] : 0,
+        typeof GG_VERT !== 'undefined' ? [GG_VERT, GG_FRAG, D] : 0, typeof HB_SPK_VERT !== 'undefined' ? [HB_SPK_VERT, HB_SPK_FRAG, D] : 0,
+        typeof LQ_V !== 'undefined' ? [LQ_V, LQ_F, D] : 0, typeof SB_DOME_V !== 'undefined' ? [SB_DOME_V, SB_DOME_F, D] : 0,
+        typeof SB_SPK_VERT !== 'undefined' ? [SB_SPK_VERT, SB_SPK_FRAG, D] : 0, typeof SKY_VERT !== 'undefined' ? [SKY_VERT, SKY_FRAG, D] : 0,
+        typeof GLEAM_NVS !== 'undefined' ? [GLEAM_NVS, GLEAM_NFS, D] : 0, typeof TRV !== 'undefined' ? [TRV, TRF, D] : 0,
+        typeof FANV !== 'undefined' ? [FANV, FANF] : 0, typeof PV !== 'undefined' ? [PV, PF] : 0, typeof APV !== 'undefined' ? [APV, APF] : 0 ];
+      for (const q of L) if (q) mk(q[0], q[1], q[2]);
+    } catch (e) {}
     try { bbpInit(); } catch (e) {}
     renderer.compile(W, camera); mats.forEach(m => m.dispose()); g.dispose(); } catch (e) { console.warn('warm', e); }
 }
