@@ -8076,7 +8076,7 @@ function updateFx(dt) {
   try {
     if (game.player && typeof rbOn === 'function' && rbOn() && game.fx.length > FXBUD.cap * 1.3) {
       const pp = game.player.pos, cand = [];
-      for (const e of game.fx) { if (e.run || e.life > 4 || e.life <= 0 || !e.obj || !e.obj.position) continue; const dx = e.obj.position.x - pp.x, dz = e.obj.position.z - pp.z; cand.push([dx * dx + dz * dz, e]); }
+      for (const e of game.fx) { if (!e.vis || e.run || e.life > 4 || e.life <= 0 || !e.obj || !e.obj.position) continue; const dx = e.obj.position.x - pp.x, dz = e.obj.position.z - pp.z; cand.push([dx * dx + dz * dz, e]); }
       cand.sort((a, b) => b[0] - a[0]);
       for (let k = 0, over = game.fx.length - FXBUD.cap; k < cand.length && over > 0; k++, over--) cand[k][1].life = 0;
     }
@@ -8130,14 +8130,14 @@ function fxSprite(tex, color, pos, s0, s1, life, o = {}) {
   if (FX_FAR) return; if (fxCrowded(pos)) return;
   const mat = new THREE.SpriteMaterial({ map:tex, color, transparent:true, depthWrite:false, blending:o.normal ? THREE.NormalBlending : fxBlend(), opacity:o.op || 1, rotation:o.rot != null ? o.rot : rand(0, TAU) });
   const sp = new THREE.Sprite(mat); sp.position.copy(pos); sp.scale.setScalar(s0); scene.add(sp);
-  game.fx.push({ life, max:life, obj:sp, upd:(t, dt) => { const k = o.ease ? 1 - Math.pow(1 - t, 3) : t; sp.scale.setScalar(s0 + (s1 - s0) * k); mat.opacity = (o.op || 1) * (1 - t); if (o.spin) mat.rotation += o.spin * (dt || 0); } });
+  game.fx.push({ vis:true, life, max:life, obj:sp, upd:(t, dt) => { const k = o.ease ? 1 - Math.pow(1 - t, 3) : t; sp.scale.setScalar(s0 + (s1 - s0) * k); mat.opacity = (o.op || 1) * (1 - t); if (o.spin) mat.rotation += o.spin * (dt || 0); } });
   return sp;
 }
 function shockRing(pos, color, r, life = 0.4, op = 0.9) {
   if (FX_FAR) return; if (fxCrowded(pos)) return;
   const mat = new THREE.MeshBasicMaterial({ map:ringTex, color, transparent:true, depthWrite:false, blending:fxBlend(), opacity:op });
   const m = new THREE.Mesh(indGeo.circle, mat); m.position.set(pos.x, 0.07, pos.z); scene.add(m);
-  game.fx.push({ life, max:life, obj:m, upd:t => { const k = 1 - Math.pow(1 - t, 2.5), s = 0.3 + r * k; m.scale.set(s, 1, s); mat.opacity = op * (1 - t); } });
+  game.fx.push({ vis:true, life, max:life, obj:m, upd:t => { const k = 1 - Math.pow(1 - t, 2.5), s = 0.3 + r * k; m.scale.set(s, 1, s); mat.opacity = op * (1 - t); } });
 }
 function hitSpark(pos, type, heavy) {
   impactContact(pos, type, null, heavy, 'hit');
@@ -19912,9 +19912,8 @@ function rbPerfTick(dt) {
   const crowd = game.fighters.filter(f => f && f !== p && !f.gone && f.state !== 'faint' && Math.hypot(f.pos.x - p.pos.x, f.pos.z - p.pos.z) < 20).length;
   PFX_SKIP = crowd >= 4 ? 0.65 : crowd >= 3 ? 0.5 : crowd >= 2 ? 0.3 : crowd >= 1 ? 0.15 : 0;
   RB_LITE = crowd >= 2;
-  /* crowded fight: shrink the effect budget and drop the render resolution one or two steps early, before the frame rate collapses */
+  /* crowded fight: shrink the effect budget */
   FXBUD.cap = crowd >= 5 ? 50 : crowd >= 4 ? 60 : crowd >= 3 ? 75 : 90;
-  if (typeof rbOn === 'function' && rbOn()) { PG.base = crowd >= 5 ? 2 : crowd >= 3 ? 1 : 0; if (PG.level < PG.base) pgSet(PG.base); }
 }
 /* minimap: island, storm, safe zone, loot, you and nearby rivals */
 function royaleMapSetup() { let c = $('#rbMap'); if (!c) { c = document.createElement('canvas'); c.id = 'rbMap'; c.width = 220; c.height = 220; $('#hud').appendChild(c); } }
