@@ -29886,7 +29886,7 @@ function advBragTick() { if (ADV.bragQ && !ADV.msg && !ADV.panel && !ADV.B && !A
 const ADV_MUSIC = {"battle": "music/battle.mp3", "cave": "music/cave.mp3", "desert": "music/desert.mp3", "forest": "music/forest.mp3", "garden": "music/garden.mp3", "indoor": "music/indoor.mp3", "legend": "music/legend.mp3", "meadow": "music/meadow.mp3", "plant": "music/plant.mp3", "ride": "music/ride.mp3", "ruins": "music/ruins.mp3", "sea": "music/sea.mp3", "sky": "music/sky.mp3", "snow": "music/snow.mp3", "surf": "music/surf.mp3", "swamp": "music/swamp.mp3", "tower": "music/tower.mp3", "town": "music/town.mp3", "volcano": "music/volcano.mp3"};   /* streamed from the music/ folder next to this file */
 const ADV_MUS_FOR = { meadow:'meadow', forest:'forest', cave:'cave', garden:'garden', snow:'snow', ruins:'ruins', volcano:'volcano', swamp:'swamp', desert:'desert', sky:'sky', plant:'plant', sea:'sea', town:'town', indoor:'indoor' };
 const ADV_BGM = { cur:null, a:null, old:[], vol:0.5, bad:{} };
-function advBgmWant() { const has = k => ADV_MUSIC[k] && !ADV_BGM.bad[k] ? k : null;
+function advBgmWant() { const has = k => ADV_MUSIC[k] && !(ADV_BGM.bad[k] && Date.now() - ADV_BGM.bad[k] < 30000) ? k : null;
   if (ADV.B || (game.match && game.match.adv)) return has('battle');
   if (!ADV.onMap || !document.getElementById('adv') || document.getElementById('adv').hidden) {   /* beta has no menu music: title, Oak's intro and the comic get a track of their own */
     if (!ADV_BETA) return null; const vis = id => { const e = document.getElementById(id); return e && !e.hidden; };
@@ -29899,10 +29899,10 @@ function advBgmWant() { const has = k => ADV_MUSIC[k] && !ADV_BGM.bad[k] ? k : n
   const b = m.rest ? (m.indoor ? 'indoor' : 'town') : advBiome(m); return ADV_MUS_FOR[b] ? has(ADV_MUS_FOR[b]) : null; }
 function advBgmTick(dt) { const on = SFX.musicOn !== false, want = on ? advBgmWant() : null, B = ADV_BGM;
   if (want !== B.cur) { if (B.a) B.old.push(B.a); B.a = null; B.cur = want;
-    if (want) { const a = new Audio(ADV_MUSIC[want]), k = want; a.onerror = () => { const u = ADV_MUSIC[k]; if (typeof u === 'string' && u.startsWith('music/') && !a.alt) { a.alt = 1; a.src = u.slice(6); a.play().catch(() => {}); return; } B.bad[k] = 1; if (B.cur === k) B.cur = '?'; }; a.loop = true; a.volume = 0; a.play().catch(() => {}); B.a = a; } }
+    if (want) { const a = new Audio(ADV_MUSIC[want]), k = want; a.onerror = () => { if (a.dead || B.a !== a) return; const u = ADV_MUSIC[k]; if (typeof u === 'string' && u.startsWith('music/') && !a.alt) { a.alt = 1; a.src = u.slice(6); a.play().catch(() => {}); return; } B.bad[k] = Date.now(); if (B.cur === k) B.cur = '?'; }; a.loop = true; a.volume = 0; a.play().catch(() => {}); B.a = a; } }
   if (B.a) { if (B.a.paused) B.a.play().catch(() => {}); B.a.volume = Math.min(B.vol, B.a.volume + dt / 0.8 * B.vol);
     try { if (MenuBGM.playing || (MenuBGM.audio && !MenuBGM.audio.paused)) MenuBGM.stop(); if (BattleBGM.audio && !BattleBGM.audio.paused) BattleBGM.stop(); SFX.music(null); } catch (e) {} }   /* our track replaces the game's menu / battle music */
-  B.old = B.old.filter(o => { o.volume = Math.max(0, o.volume - dt / 0.6 * B.vol); if (o.volume <= 0.001) { o.pause(); o.src = ''; return false; } return true; }); }
+  B.old = B.old.filter(o => { o.volume = Math.max(0, o.volume - dt / 0.6 * B.vol); if (o.volume <= 0.001) { o.onerror = null; o.dead = 1; o.pause(); o.removeAttribute('src'); try { o.load(); } catch (e) {} return false; } return true; }); }
 setInterval(() => { try { advBgmTick(0.15); } catch (e) {} }, 150);   /* runs on the field and in battles alike */
 /* ---------- objects (NPCs, trainers, signs) ---------- */
 function advBuildObjs() { const m = ADV.m, S = ADV.S;
@@ -30782,7 +30782,7 @@ function a3IsTree(id) { if (id < 0) return false; if (ADV.P && ADV.P.tm && ADV.P
 function a3Tex(cv) { const t = new THREE.CanvasTexture(cv); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; return t; }
 function a3TileDraw(ctx, id, x, y) { if (id < 0) return; const s = Math.floor(id / ADV_SHM), i = id % ADV_SHM, c = ADV_COLS[s]; ctx.drawImage(ADV.img['s' + s], (i % c) * ADV_T, Math.floor(i / c) * ADV_T, ADV_T, ADV_T, x, y, ADV_T, ADV_T); }
 function a3Avg(ctx, x, y, w, h) { if (!(w > 0 && h > 0)) return new THREE.Color(0.55, 0.75, 0.5); const d = ctx.getImageData(x, y, w, h).data; let r = 0, g = 0, b = 0, n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } return n ? new THREE.Color(r / n / 255, g / n / 255, b / n / 255) : new THREE.Color(0.55, 0.75, 0.5); }
-function a3Init() { if (A3.scene) return; const SKY = 0x9fd8ff; A3.scene = new THREE.Scene(); A3.scene.background = new THREE.Color(SKY); A3.scene.fog = new THREE.Fog(SKY, 14, 30); A3.cam = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
+function a3Init() { if (A3.scene) return; const SKY = 0x9fd8ff; A3.scene = new THREE.Scene(); A3.scene.background = new THREE.Color(SKY); A3.scene.fog = new THREE.Fog(SKY, 22, 46); A3.cam = new THREE.PerspectiveCamera(40, 1, 0.1, 90);
   A3.owTex = new THREE.Texture(ADV.img.ow); A3.owTex.magFilter = A3.owTex.minFilter = THREE.NearestFilter; A3.owTex.generateMipmaps = false; A3.owTex.needsUpdate = true;
   A3.bwTex = new THREE.Texture(ADV.img.bw2); A3.bwTex.magFilter = A3.bwTex.minFilter = THREE.NearestFilter; A3.bwTex.generateMipmaps = false; A3.bwTex.needsUpdate = true; }
 function a3Dispose(o) { o.traverse(q => { if (q.geometry) q.geometry.dispose(); if (q.material) { const ms = Array.isArray(q.material) ? q.material : [q.material]; for (const mm of ms) { if (mm.map && mm.map !== A3.owTex) mm.map.dispose(); mm.dispose(); } } }); }
@@ -31042,7 +31042,7 @@ function a3Frame(dt) { const m = ADV.m; if (A3.m !== m) a3Build(m); a3WaterTick(
   else if (A3.ball && A3.ball.parent) A3.ball.parent.remove(A3.ball);
   /* camera: fixed classic angle following the trainer */
   const cv = renderer.domElement, asp = cv.clientWidth / Math.max(1, cv.clientHeight); if (Math.abs(A3.cam.aspect - asp) > 0.001) { A3.cam.aspect = asp; A3.cam.updateProjectionMatrix(); }
-  const tx = ADV.px + 0.5, tz = ADV.py + 0.5; if (m.indoor) A3.cam.position.set(tx, 11, tz + 4.5); else if (m.floor > 0) A3.cam.position.set(tx, 5.6, tz + 3.1); else A3.cam.position.set(tx, 5.8, tz + 4.4);   /* closer to your trainer */   /* Tower: a steeper look so tall walls don't hide you */ A3.cam.lookAt(tx, 0.6, tz);
+  const tx = ADV.px + 0.5, tz = ADV.py + 0.5; if (m.indoor) A3.cam.position.set(tx, 11, tz + 4.5); else if (m.floor > 0) A3.cam.position.set(tx, 9.8, tz + 5.4); else A3.cam.position.set(tx, 10.2, tz + 7.7);   /* zoomed out to a FireRed-like view (~15×10 tiles) */   /* closer to your trainer */   /* Tower: a steeper look so tall walls don't hide you */ A3.cam.lookAt(tx, 0.6, tz);
   if (ADV.cine) { const L = ADV.cine, k = Math.min(1, L.t / 1.2), e2 = k * k * (3 - 2 * k), lx = L.o.x + 0.5, lz = L.o.y + 0.5, sh = L.t > 0.9 && L.t < 1.6 ? (1.6 - L.t) * 0.25 : 0;
     A3.cam.position.lerp(new THREE.Vector3(lx + (Math.random() - 0.5) * sh, 4.6, lz + 5.2 + (Math.random() - 0.5) * sh), e2); A3.cam.lookAt(tx + (lx - tx) * e2, 0.6 + 0.8 * e2, tz + (lz - tz) * e2); }
   try { if (renderer.clearViewOffset) A3.cam.clearViewOffset(); } catch (e) {}
