@@ -21982,7 +21982,73 @@ const hasSave = () => { const S = prof.story; return !!((S && (S.started || (S.u
 let ngAv = 'red';
 function openNewGame() {
   if (hasSave() && !confirm('Start a new game? Your current save will be erased.')) return;
-  ngAv = 'red'; ngG = 'm'; ngHero = 'red'; $('#ngName').value = ''; showScreen('newGame'); renderNewGame(); setTimeout(() => $('#ngName').focus(), 50);
+  ngAv = 'red'; ngG = 'm'; ngHero = 'red'; $('#ngName').value = '';
+  profIntro(name => { $('#ngName').value = name; showScreen('newGame'); ngIntroMode(true); renderNewGame(); });
+}
+/* ---- Professor Oak intro: talks, asks your name, then hands over to the hero picker ---- */
+function ngIntroMode(on) { const c = $('#ngName').closest('.card'); if (c) c.style.display = on ? 'none' : ''; const h = $('#newGame .head h1'); if (h) h.textContent = on ? 'Who are you?' : 'New Game'; }
+function profBox() {
+  let o = $('#profIntro'); if (o) return o;
+  o = document.createElement('div'); o.id = 'profIntro'; o.hidden = true;
+  o.innerHTML = `<style>#profIntro[hidden],#profIntro [hidden]{display:none!important}#profIntro{position:fixed;inset:0;z-index:9000;background:radial-gradient(ellipse at 50% 40%,#3b4a6b 0%,#141a2a 70%,#0a0d16 100%);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;font-family:inherit;user-select:none;-webkit-user-select:none}
+  #profIntro .pfStage{flex:1;display:flex;align-items:center;justify-content:center;gap:4vw;width:100%;min-height:0}
+  #profIntro .pfOak{height:min(46vh,300px);image-rendering:pixelated;filter:drop-shadow(0 8px 0 #0005);animation:pfIn .6s ease-out}
+  #profIntro .pfMon{height:min(26vh,160px);image-rendering:pixelated;display:none;animation:pfIn .5s ease-out}
+  #profIntro .pfFloor{position:absolute;left:50%;transform:translateX(-50%);width:min(60vw,420px);height:40px;border-radius:50%;background:#0006;bottom:calc(min(30vh,190px) + 20px);z-index:-1}
+  #profIntro .pfBox{position:relative;width:min(760px,calc(100vw - 24px));margin:0 12px calc(14px + env(safe-area-inset-bottom,0px));background:#f8f8f8;color:#222;border:4px solid #4a5a8c;border-radius:14px;box-shadow:0 0 0 3px #f8f8f8,0 0 0 6px #2c355a;padding:16px 20px 22px;min-height:96px;font-size:clamp(15px,2.3vw,20px);line-height:1.45}
+  #profIntro .pfWho{position:absolute;top:-16px;left:18px;background:#e8562a;color:#fff;font-size:13px;font-weight:700;padding:2px 12px;border-radius:999px}
+  #profIntro .pfNext{position:absolute;right:14px;bottom:6px;color:#e8562a;font-size:14px;animation:pfB 1s steps(2) infinite}
+  #profIntro .pfIn{display:flex;gap:8px;margin-top:10px}#profIntro .pfIn input{flex:1;min-width:0;font:inherit;padding:8px 12px;border:2px solid #4a5a8c;border-radius:10px;background:#fff;color:#222}
+  #profIntro .pfIn button{font:inherit;font-weight:700;padding:8px 16px;border:0;border-radius:10px;background:#e8562a;color:#fff;cursor:pointer}
+  #profIntro .pfSkip{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));right:14px;background:#0006;color:#ddd;border:1px solid #fff3;border-radius:999px;padding:5px 14px;font:inherit;font-size:13px;cursor:pointer}
+  @keyframes pfIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}@keyframes pfB{50%{opacity:0}}</style>
+  <button class="pfSkip" type="button">Skip ▸</button><div class="pfStage"><img class="pfOak" alt="Professor Oak"><img class="pfMon" alt=""></div><div class="pfFloor"></div>
+  <div class="pfBox"><span class="pfWho">PROF. OAK</span><div class="pfTxt"></div><div class="pfIn" hidden><input maxlength="16" autocomplete="off" spellcheck="false" placeholder="Your name"><button type="button">OK</button></div><span class="pfNext">▼</span></div>`;
+  document.body.appendChild(o);
+  const oak = o.querySelector('.pfOak'); oak.onerror = () => { oak.style.visibility = 'hidden'; }; oak.src = avURL('oak-gen3');
+  return o;
+}
+/* lines: string = say it; {mon:id} = show a Pokémon; {ask:true} = name prompt; fn(name) for lines using the name */
+function profTalk(lines, done) {
+  const o = profBox(), txt = o.querySelector('.pfTxt'), nx = o.querySelector('.pfNext'), inp = o.querySelector('.pfIn'), mon = o.querySelector('.pfMon');
+  o.hidden = false; inp.hidden = true; let i = -1, typing = null, full = '', name = '';
+  const finish = () => { clearInterval(typing); typing = null; txt.textContent = full; const ask = !!(lines[i] && lines[i].ask); nx.hidden = ask; if (ask && inp.hidden) { inp.hidden = false; const f = inp.querySelector('input'); f.value = ''; setTimeout(() => f.focus(), 30); } };
+  const next = () => {
+    if (typing) return finish(); if (!inp.hidden) return;
+    i++; while (i < lines.length && lines[i] && lines[i].mon !== undefined) { const m = lines[i].mon; if (m) { mon.src = `https://play.pokemonshowdown.com/sprites/gen5ani/${m}.gif`; mon.style.display = 'block'; } else mon.style.display = 'none'; i++; }
+    if (i >= lines.length) { o.hidden = true; o.onclick = null; mon.style.display = 'none'; return done(name); }
+    const L = lines[i]; full = typeof L === 'function' ? L(name) : L.ask ? L.text : L; txt.textContent = ''; nx.hidden = true; let k = 0;
+    try { SFX.click(); } catch (e) {}
+    typing = setInterval(() => { k += 2; txt.textContent = full.slice(0, k); if (k >= full.length) finish(); }, 28);
+  };
+  const submit = () => { const f = inp.querySelector('input'), v = f.value.trim().slice(0, 16); if (!v) { f.focus(); return; } name = v; inp.hidden = true; next(); };
+  inp.querySelector('button').onclick = e => { e.stopPropagation(); submit(); };
+  inp.querySelector('input').onkeydown = e => { if (e.key === 'Enter') submit(); };
+  inp.onclick = e => e.stopPropagation();
+  o.querySelector('.pfSkip').onclick = e => { e.stopPropagation(); clearInterval(typing); typing = null;
+    const ask = lines.findIndex(l => l && l.ask); if (!name && ask >= 0 && i < ask) { i = ask - 1; while (lines[i] && lines[i].mon !== undefined) i--; mon.style.display = 'none'; next(); } else { i = lines.length - 1; next(); } };
+  o.onclick = () => next(); next();
+}
+function profIntro(done) {
+  profTalk([
+    'Hello there! Welcome to the world of Pokémon!',
+    'My name is Oak. People call me the Pokémon Professor.',
+    { mon:'pikachu' },
+    'This world is inhabited far and wide by creatures called Pokémon.',
+    'For some people, Pokémon are pets. Others use them for battles. Myself… I study Pokémon as a profession.',
+    { mon:null },
+    'But lately, every trainer is talking about one place: the Tower of Gods.',
+    'A hundred floors high. Wild Pokémon, strong trainers, even Legendary Pokémon wait inside — and nobody knows what lies at the top.',
+    { ask:true, text:'But first, tell me a little about yourself. What is your name?' },
+    n => `Right! So your name is ${n}!`,
+    'Now, show me who you are, and which Pokémon will stand by your side.'
+  ], done);
+}
+function profOutro(name, done) {
+  profTalk([
+    () => `${name}! Your very own Pokémon legend is about to unfold!`,
+    'A world of dreams and adventures with Pokémon awaits! Let\'s go!'
+  ], done);
 }
 let ngG = 'm', ngHero = 'red';
 function renderNewGame() {
@@ -22020,7 +22086,7 @@ function startNewGame() {
   try { localStorage.removeItem('ebAdvSave'); } catch (e) {}
   saveProfile(); sel.team = []; sel.items = {}; SFX.unlock(); goFullscreen();
   if (IS_PROTO && pendingInvite) { protoUnlock(); LB.hello(); showScreen('title'); setTimeout(tryInvite, 300); }
-  else if (IS_PROTO) { protoUnlock(); LB.hello(); showScreen('title'); ensureMeta(); if (!prof.meta.tutDone) setTimeout(() => { if (confirm('Play the 2-minute tutorial? Recommended for new players.')) startTutorialBattle(); }, 500); } else { if (typeof playComic === 'function') playComic(() => openAdventure()); else openAdventure(); }
+  else if (IS_PROTO) { protoUnlock(); LB.hello(); showScreen('title'); ensureMeta(); if (!prof.meta.tutDone) setTimeout(() => { if (confirm('Play the 2-minute tutorial? Recommended for new players.')) startTutorialBattle(); }, 500); } else { ngIntroMode(false); const go = () => { if (typeof playComic === 'function') playComic(() => openAdventure()); else openAdventure(); }; try { profOutro(name, go); } catch (e) { go(); } }
 }
 $('#ngName').addEventListener('input', () => { const el = $('#ngAv .ini'); if (el) el.textContent = (($('#ngName').value || 'T').trim()[0] || 'T').toUpperCase(); });
 $('#ngStart').addEventListener('click', () => { SFX.click(); startNewGame(); });
@@ -31381,7 +31447,7 @@ function advDrawArt(ctx, scr) { for (const o of ADV.objs) { if (!o.e.av) continu
 addEventListener('pointerdown', function advFsOnce(e) { if (e.pointerType !== 'touch') return; removeEventListener('pointerdown', advFsOnce, true); const el = document.documentElement; if (document.fullscreenElement || !(el.requestFullscreen || el.webkitRequestFullscreen)) return;
   try { const p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el); if (p && p.catch) p.catch(() => {}); } catch (er) {} }, true);
 /* beta build: the game is the Tower — skip the old Rumble title / lobby and open the Tower straight away */
-if (ADV_BETA) { const bt = () => { try { openAdventure(); } catch (e) { setTimeout(bt, 300); } }; if (document.readyState === 'complete') setTimeout(bt, 400); else addEventListener('load', () => setTimeout(bt, 400)); }
+/* beta: show the normal title screen (New Game / Continue) instead of auto-entering the Tower */
 function frame(now) {
   if (ADV.onMap) { last = now; try { advFrame(now); } catch (e) { console.error(e); } requestAnimationFrame(frame); return; }
   if (ADV.away) { last = now; requestAnimationFrame(frame); return; }   /* a Rotom app screen is open: no battle running underneath */
