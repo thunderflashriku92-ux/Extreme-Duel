@@ -21896,6 +21896,7 @@ $('#soundBtn').addEventListener('click', () => { settings.sound = SFX.on; saveSe
 /* ---------- screens ---------- */
 let onTitle = true;
 function showScreen(id) {
+  if (typeof ADV !== 'undefined' && ADV.ext && ['title', 'start', 'menu', 'newGame'].includes(id) && typeof advNetBack === 'function' && advNetBack()) return;
   if (id === 'title' && typeof HOME !== 'undefined' && prof && prof.name) { HOME.more = false; lobbyEnter(); return; }
   if (typeof HOME !== 'undefined' && HOME.on) { lobbyLeave(); clearTimeout(HOME.sayT); }
   for (const sid of ['start', 'newGame', 'title', 'menu', 'settings', 'profile', 'customize', 'credits', 'story', 'online', 'board', 'ranked', 'friends', 'bpass']) $('#' + sid).hidden = sid !== id;
@@ -22998,7 +22999,8 @@ function onNet(m) {
   if (m.t === 'hello') {
     const team = (Array.isArray(m.team) ? m.team : []).filter(id => ROSTER[id]).slice(0, 6); if (!team.length) team.push('pikachu');
     const items = {}; team.forEach(id => { const it = m.items && m.items[id]; items[id] = typeof it === 'string' ? it : ''; });
-    NET.them = { name:String(m.name || 'Rival').slice(0, 16), av:String(m.av || 'red'), team, items, pts:Math.max(0, Math.min(99999, m.pts | 0)), lb:String(m.lb || '').slice(0, 32), pid:cleanPid(m.pid), shiny:(Array.isArray(m.shiny) ? m.shiny : []).filter(id => ROSTER[id]) };
+    if (typeof advNetSan === 'function') m._adv = advNetSan(m.adv, (Array.isArray(m.team) ? m.team : []).filter(id => ROSTER[id]).slice(0, 6));
+    NET.them = { name:String(m.name || 'Rival').slice(0, 16), av:String(m.av || 'red'), team, items, pts:Math.max(0, Math.min(99999, m.pts | 0)), lb:String(m.lb || '').slice(0, 32), pid:cleanPid(m.pid), shiny:(Array.isArray(m.shiny) ? m.shiny : []).filter(id => ROSTER[id]), adv:m._adv || {} };
     if (NET.role === 'guest') {
       if (m.rules) { NET.hostRules = m.rules; try { renderRules(); } catch (e) {} }
       return;
@@ -23037,7 +23039,7 @@ function onNet(m) {
       const h = m.host;
       const team = (Array.isArray(h.team) ? h.team : []).filter(id => ROSTER[id]).slice(0, 6);
       const items = {}; team.forEach(id => { const it = h.items && h.items[id]; items[id] = typeof it === 'string' ? it : ''; });
-      NET.them = { name:String(h.name || 'Host').slice(0, 16), av:String(h.av || 'red'), team, items, pts:Math.max(0, Math.min(99999, h.pts | 0)), lb:String(h.lb || '').slice(0, 32), pid:cleanPid(h.pid), shiny:(Array.isArray(h.shiny) ? h.shiny : []).filter(id => ROSTER[id]) };
+      NET.them = { name:String(h.name || 'Host').slice(0, 16), av:String(h.av || 'red'), team, items, pts:Math.max(0, Math.min(99999, h.pts | 0)), lb:String(h.lb || '').slice(0, 32), pid:cleanPid(h.pid), shiny:(Array.isArray(h.shiny) ? h.shiny : []).filter(id => ROSTER[id]), adv:typeof advNetSan === 'function' ? advNetSan(h.adv, team) : {} };
     }
     netStat('Joined — Ready on the room card');
     try { Promise.resolve(vlRenderLobbies(true)).catch(() => {}); } catch (e) {}
@@ -23108,7 +23110,7 @@ function netStart() {
 function netBegin(m) {
   const H = NET.role === 'host', mine = H ? m.host : m.guest, theirs = H ? m.guest : m.host;
   const n = [1, 3, 6].includes(m.size) ? m.size : 1, R = Object.assign({}, NET.rules, m.rules || {});
-  NET.them = theirs; game.oppShiny = (theirs.shiny || []).filter(id => ROSTER[id]); NET.mid = String(m.mid || ''); if (NET.ranked && NET.mid) LB.start(NET.mid, theirs.lb || '');
+  NET.them = theirs; try { NET.advMine = advNetSan(mine.adv, mine.team || []); NET.advThem = advNetSan(theirs.adv, theirs.team || []); } catch (e) { NET.advMine = NET.advThem = {}; } game.oppShiny = (theirs.shiny || []).filter(id => ROSTER[id]); NET.mid = String(m.mid || ''); if (NET.ranked && NET.mid) LB.start(NET.mid, theirs.lb || '');
   NET.fmt = m.fmt === 'bo3' ? 'bo3' : 'one'; NET.size = n; NET.live = R; NET.rematch = {}; netRoundReset(NET.round + 1);
   goFullscreen(); game.modeType = 'online'; surv.active = false; game.gim = freshGim(); game.moveMap = null;
   game.itemMap = { p:netItems(mine.items, R), o:netItems(theirs.items, R) };
@@ -23116,7 +23118,7 @@ function netBegin(m) {
   sel.team = game.match.you.slice(); sel.oppTeam = game.match.opp.slice(); sel.you = sel.team[0]; sel.opp = sel.oppTeam[0];
   for (const id of [...game.match.you, ...game.match.opp]) ensureSprite(id);
   beginMatch(game.match.you[0], game.match.opp[0], { arena:m.ak, weather:m.weather || '', hazard:m.hz || '', intro:'full', diff:'normal' });
-  game.ai = NET.remote;
+  game.ai = NET.remote; try { advNetApply(); } catch (e) {}
 }
 /* each send-out is a round; both sides must reach the countdown of the same round before it starts */
 function netRoundReset(r) { NET.round = r; NET.koOK = false; NET.timeOK = false; NET.snapT = 0; NET.remote = new NetInput(); }
@@ -23130,7 +23132,7 @@ function netNextRound(youId, oppId, o) {
   netRoundReset(NET.round + 1);
   if (NET.live && NET.live.per === 'mon' && game.gim) for (const sd of ['p', 'o']) if (o.sides && o.sides[sd]) game.gim[sd] = { mega:false, dmax:false, z:false };
   beginMatch(youId, oppId, Object.assign({ weather:weatherState ? weatherState.k : '', hazard:hazardState ? hazardState.kind : '', diff:'normal' }, o));
-  game.ai = NET.remote;
+  game.ai = NET.remote; try { advNetApply(); } catch (e) {}
 }
 function netRematchCheck() {
   if (NET.rematch.me && NET.rematch.them && NET.role === 'host') netStart();
@@ -23644,7 +23646,8 @@ function renderRankedSide() {
   loadRankedTeam();
   const R = rankState();
   const T = tierOf(R.pts);
-  const team = (prof.teams.ranked && prof.teams.ranked.mons) || sel.team || [];
+  const tw = typeof ADV !== 'undefined' && ADV.ext && typeof advNetTeam === 'function' ? advNetTeam() : null;   /* from the Tower: your Tower team, at Lv 50 */
+  const team = tw ? tw.map(m => m.id) : (prof.teams.ranked && prof.teams.ranked.mons) || sel.team || [];
   const searching = RK.active && !NET.on;
   const secs = searching ? Math.floor((performance.now() - RK.t0) / 1000) : 0;
   const unranked = (R.w + R.l) === 0;
@@ -29553,7 +29556,7 @@ function advBuildDom() {
   const st = document.createElement('style'); st.textContent = `
 #adv{position:fixed;inset:0;z-index:60;background:transparent;touch-action:none;user-select:none;-webkit-user-select:none}
 #advCv{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated}#advWx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}#advFloor i{display:block;font-style:normal;font-size:clamp(30px,8vw,46px);margin-bottom:4px}#advFloor.on b{animation:advFl .7s ease-out}@keyframes advFl{from{letter-spacing:14px;opacity:0}to{letter-spacing:3px;opacity:1}}#advFloor em{display:inline-block;margin-top:6px;padding:2px 10px;border-radius:9px;background:#ffb54a;color:#1a1300;font:800 12px system-ui;font-style:normal}
-#adv .apad{position:absolute;bottom:18px;width:156px;height:156px}#advStick{position:absolute;left:0;bottom:0;width:45%;height:58%;touch-action:none;z-index:3}#adv #advMsg,#adv #advCatch{z-index:8}#adv #advPanel{z-index:9}#advStick .asb{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;background:radial-gradient(circle,#fff1 0 55%,#fff3 56% 100%);border:2px solid #fff5;opacity:.55;transition:opacity .15s}#advStick .asb.on{opacity:.95}#advStick .ask{position:absolute;left:50%;top:50%;width:50px;height:50px;border-radius:50%;background:#fffc;box-shadow:0 2px 8px #0006;transform:translate(-50%,-50%)}#adv .apad button{position:absolute;width:52px;height:52px;border-radius:12px;border:0;background:#fff3;color:#fff;font-size:20px;touch-action:none}
+#adv .apad{position:absolute;bottom:18px;width:156px;height:156px}body.towerNet #rkSetTeam,body.towerNet #vlSetTeam{display:none!important}#advStick{position:absolute;left:0;bottom:0;width:45%;height:58%;touch-action:none;z-index:3}#adv #advMsg,#adv #advCatch{z-index:8}#adv #advPanel{z-index:9}#advStick .asb{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;background:radial-gradient(circle,#fff1 0 55%,#fff3 56% 100%);border:2px solid #fff5;opacity:.55;transition:opacity .15s}#advStick .asb.on{opacity:.95}#advStick .ask{position:absolute;left:50%;top:50%;width:50px;height:50px;border-radius:50%;background:#fffc;box-shadow:0 2px 8px #0006;transform:translate(-50%,-50%)}#adv .apad button{position:absolute;width:52px;height:52px;border-radius:12px;border:0;background:#fff3;color:#fff;font-size:20px;touch-action:none}
 #advDpad{left:16px}#advDpad [data-d=u]{left:52px;top:0}#advDpad [data-d=d]{left:52px;top:104px}#advDpad [data-d=l]{left:0;top:52px}#advDpad [data-d=r]{left:104px;top:52px}
 #advAB{right:16px;width:140px}#advAB button{width:64px!important;height:64px!important;border-radius:50%!important;font-weight:900}#advAB [data-k=a]{right:0;top:40px}#advAB [data-k=b]{right:74px;top:84px}
 #advTop{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:center;pointer-events:none}
@@ -29900,6 +29903,7 @@ function advSnd(k, o) { o = o || {}; if (SFX.on === false || !ADV_SFX[k]) return
 const ADV_MUS_FOR = { meadow:'meadow', forest:'forest', cave:'cave', garden:'garden', snow:'snow', ruins:'ruins', volcano:'volcano', swamp:'swamp', desert:'desert', sky:'sky', plant:'plant', sea:'sea', town:'town', indoor:'indoor' };
 const ADV_BGM = { cur:null, a:null, old:[], vol:0.5, bad:{} };
 function advBgmWant() { const has = k => ADV_MUSIC[k] && !(ADV_BGM.bad[k] && Date.now() - ADV_BGM.bad[k] < 30000) ? k : null;
+  if (ADV.ext) return document.body.classList.contains('in-battle') ? has('battle') : (has('tower') || has('town'));
   if (ADV.B || (game.match && game.match.adv)) return has('battle');
   if (!ADV.onMap || !document.getElementById('adv') || document.getElementById('adv').hidden) {   /* beta has no menu music: title, Oak's intro and the comic get a track of their own */
     if (!ADV_BETA) return null; const vis = id => { const e = document.getElementById(id); return e && !e.hidden; };
@@ -29963,10 +29967,10 @@ function advTalk(o) { const e = o.e, who = e.name, S = ADV.S; ADV.sp = o; if (e.
       advSave(); }); }
   if (role === 'center') advTip('center', 'Pokémon Centers heal your whole party for free, and the PC stores extra Pokémon. If you lose, you return to the last one you used.');
   if (role === 'mart') advTip('mart', 'Poké Marts sell Poké Balls and potions. Your money is shown at the top right.');
-  if (role === 'center') return advSay(e.text ? advPages(e.text, who) : ['Welcome to the Pokémon Center!'], () => advAsk('Shall we heal your Pokémon?', ['Heal', 'Use the PC', 'No thanks'], i => {
+  if (role === 'center') return advSay(e.text ? advPages(e.text, who) : ['Welcome to the Pokémon Center!'], () => advAsk('Shall we heal your Pokémon?', ['Heal', 'Use the PC', '⚔️ Link Battle', 'No thanks'], i => {
     if (!S.pcLink) { S.pcLink = 1; advTip('pcapp', 'Rotom linked to the PC! Open Rotom → PC anywhere to swap Pokémon. Healing and buying slots still need a Pokémon Center.'); }
     if (i === 0) { for (const p of S.party) p.hp = 1; S.center = { map:ADV.m.id, x:ADV.x, y:ADV.y }; advSave(); if (!advSnd('heal', { duck:7 })) try { SFX.heal ? SFX.heal() : SFX.click(); } catch (er) {} advSay(['♪ Your Pokémon are fully healed!', 'We hope to see you again!']); }
-    else if (i === 1) advPC(false); else advSay(['We hope to see you again!']); }));
+    else if (i === 1) advPC(false); else if (i === 2) advLinkCounter(); else advSay(['We hope to see you again!']); }));
   if (role === 'spring') { S.spring = S.spring || {};
     if (S.spring[o.key]) return advSay(e.after ? advPages(e.after, who) : ['The spring has run dry…']);
     return advSay(e.text ? advPages(e.text, who) : ['A shimmering spring… Its water glows softly.'], () => advAsk(e.ask || 'Let your Pokémon drink?', ['Drink', 'Not now'], i => { if (i !== 0) return advMsgClose();
@@ -31556,13 +31560,34 @@ function advRecents() { ADV.inPhone = true; const L = (ADV.recent || []).filter(
   advPanel(`<div class="rp-rec">${L.length ? L.map(k => { const [i, n, col] = ADV_APPS[k]; return `<button class="rp-card" data-r="${k}"><div class="rp-card-h"><span style="--c:${col}">${i}</span>${n}</div><div class="rp-card-b" style="--c:${col}">${i}</div></button>`; }).join('') : '<p style="text-align:center;opacity:.7;margin-top:40%">No recent apps</p>'}</div>${L.length ? '<div class="acts" style="justify-content:center"><button class="ab" data-r="clear">Close all</button></div>' : ''}`,
     B => B.onclick = e => { const b = e.target.closest('[data-r]'); if (!b) return; SFX.click(); if (b.dataset.r === 'clear') { ADV.recent = []; return advPhone(); } advPhoneOpen(b.dataset.r); }); }
 /* Rotom Phone: a real-looking smartphone — status bar with the time, swipeable home screens with widgets, a dock */
+/* ================= Online from the Tower: Link Battle counter (Pokémon Center), Friends + Leaderboard apps =================
+   Your Tower team goes online at Lv 50 with its own IVs, EVs and nature, and the moves it has unlocked at its real level. */
+const advNetSan = (a, team) => { const o = {}; if (!a || typeof a !== 'object') return o; const n = (v, lo, hi) => Math.max(lo, Math.min(hi, +v || 0));
+  for (const id of team) { const q = a[id]; if (!q || typeof q !== 'object') continue; const iv = {}, ev = {}; for (const k of ADV_STATS) { iv[k] = n(q.iv && q.iv[k], 0, 31); ev[k] = n(q.ev && q.ev[k], 0, 252); }
+    o[id] = { iv, ev, nat:n(q.nat, 0, 24) | 0, g:q.g === 'f' ? 'f' : q.g === 'm' ? 'm' : '', lv:n(q.lv, 1, 100) | 0 }; } return o; };
+function advNetTeam() { const S = ADV.S; if (!S || !S.party || !S.party.length) return null; const seen = new Set();
+  return S.party.filter(m => ROSTER[m.id] && !seen.has(m.id) && seen.add(m.id)).slice(0, 6).map(m => advFix(m)); }
+{ const _mni = myNetInfo; myNetInfo = function () { const r = _mni(); try { const P = advNetTeam(); if (P) { r.team = P.map(m => m.id); r.items = {}; r.moves = {}; r.adv = {}; r.shiny = P.filter(m => m.sh).map(m => m.id);
+      P.forEach(m => { r.items[m.id] = ''; r.moves[m.id] = movesOf(m.id); r.adv[m.id] = { iv:m.iv, ev:m.ev, nat:m.nat, g:m.g, lv:m.lv }; }); } } catch (e) {} return r; }; }
+/* both sides: every fighter that comes out is set to Lv 50 with its trainer's IVs / EVs / nature */
+function advNetApply() { if (!game.match || !game.match.online) return; const A = NET.advMine || {}, T = NET.advThem || {};
+  const put = (F, a) => { if (!F || !a || !ROSTER[F.id]) return; const st = advStats({ id:F.id, lv:50, iv:a.iv, ev:a.ev, nat:a.nat }); F.stats = st; F.advLv = 50; F.advG = a.g;
+    F.maxHp = Math.max(1, Math.round(st.hp * HP_MULT[game.len])); F.hp = F.maxHp; F.advLock = advLocks(F.moves, a.lv); };
+  put(game.player, A[game.player && game.player.id]); put(game.foe, T[game.foe && game.foe.id]); }
+/* the counter, the phone apps, and the way back */
+function advNetGo(k) { const P = advNetTeam(); if (!P) return advSay(['You need at least one Pokémon to battle online!']);
+  advSave(); ADV.ext = k; ADV.onMap = false; $('#adv').hidden = true; document.body.classList.add('towerNet'); try { sel.team = P.map(m => m.id); sel.you = sel.team[0]; } catch (e) {}
+  try { (k === 'ranked' ? openRanked : k === 'board' ? openBoard : k === 'friends' ? openFriends : openOnline)(); } catch (e) { console.warn(e); advNetBack(); } }
+function advNetBack() { if (!ADV.ext) return false; ADV.ext = null; document.body.classList.remove('towerNet'); try { if (NET.on) netClose(); } catch (e) {} advShow(); return true; }
+function advLinkCounter() { advSay([{ t:'Welcome to the Link Battle counter! Battle trainers from all over the world here.', who:'Link Clerk' }, { t:'Your team is set to Lv 50 for fair battles — IVs, EVs, natures and the moves each Pokémon has learned stay the same.', who:'Link Clerk' }],
+  () => advAsk('What would you like to do?', ['⚔️ Online Battle', '🏆 Ranked Match', 'Not now'], i => { if (i === 0) advNetGo('online'); else if (i === 1) advNetGo('ranked'); else advSay([{ t:'Come back anytime!', who:'Link Clerk' }]); })); }
 const ADV_APPS = { dex:['📖', 'Pokédex', '#e8473c'], party:['🔴', 'Pokémon', '#f05a4f'], bag:['🎒', 'Bag', '#d9752b'], map:['🗺️', 'Map', '#2f9e6b'], pc:['💻', 'PC', '#4f6ad9'], lift:['🛗', 'Elevator', '#3a8fd6'],
   goals:['📅', 'Daily Goals', '#e0a024'], card:['🪪', 'Trainer Card', '#3d7fd1'], vip:['👑', 'VIP', '#a55be0'], tips:['💡', 'Tips', '#e8c13a'], set:['⚙️', 'Settings', '#6b7385'], save:['💾', 'Save', '#5560a8'],
-  cred:['📜', 'Credits', '#b5824a'], maps:['📂', 'Load maps', '#d0a03a'], exit:['🏟️', 'Lobby', '#7b5cc4'] };
+  cred:['📜', 'Credits', '#b5824a'], maps:['📂', 'Load maps', '#d0a03a'], exit:['🏟️', 'Lobby', '#7b5cc4'], friends:['👥', 'Friends', '#2bb3a3'], board:['🏆', 'Rankings', '#e0a024'] };
 function advPhoneOpen(k) { ADV.inPhone = true; if (ADV_APPS[k] && !['maps', 'exit'].includes(k)) { ADV.recent = [k, ...(ADV.recent || []).filter(x => x !== k)].slice(0, 6); } if (k === 'x') advPanelClose(); else if (k === 'dex') advPokedex(); else if (k === 'party') advParty(); else if (k === 'bag') advBag(); else if (k === 'map') advMapApp(); else if (k === 'pc') advPC(true); else if (k === 'lift') advElevator(); else if (k === 'card') advCard(); else if (k === 'goals') advGoalsApp(); else if (k === 'tips') advTipsApp();
-  else if (k === 'save') advSaveApp(); else if (k === 'maps') advMapsMenu(); else if (k === 'exit') { advPanelClose(); advExit(); } else if (k === 'vip') advVipApp(); else if (k === 'set') advSettings(); else if (k === 'cred') advCredits(); else if (k === 'ob') advOutbreakApp(); }
+  else if (k === 'save') advSaveApp(); else if (k === 'maps') advMapsMenu(); else if (k === 'exit') { advPanelClose(); advExit(); } else if (k === 'vip') advVipApp(); else if (k === 'set') advSettings(); else if (k === 'cred') advCredits(); else if (k === 'ob') advOutbreakApp(); else if (k === 'friends' || k === 'board') { advPanelClose(); advNetGo(k); } }
 function advPhone() { if (ADV.msg || ADV.catch || ADV.B || ADV.fx) return; ADV.inPhone = true; const S = ADV.S, c = advDexCount(), h = ADV_HEROES.find(x => x.k === S.hero), m = ADV.m;
-  const dock = ['dex', 'party', 'bag', 'map'], more = [...(S.pcLink ? ['pc'] : []), ...(S.top || advRestMap() ? ['lift'] : []), 'goals', 'card', 'vip', 'save', 'tips', 'set', 'cred', ...(ADV_BETA ? [] : ['maps', 'exit'])];
+  const dock = ['dex', 'party', 'bag', 'map'], more = [...(S.pcLink ? ['pc'] : []), ...(S.top || advRestMap() ? ['lift'] : []), 'goals', 'card', 'friends', 'board', 'vip', 'save', 'tips', 'set', 'cred', ...(ADV_BETA ? [] : ['maps', 'exit'])];
   const icon = k => { const [i, n, col] = ADV_APPS[k]; return `<button class="rp-app" data-p="${k}"><span style="--c:${col}">${i}</span><em>${n}</em></button>`; };
   const where = m.rest ? 'Ground Floor' : m.floor > 0 ? `Floor ${m.floor}` : m.name, sub = m.floor > 0 ? m.name : m.rest ? m.name : '';
   const bi = ADV_BIOMES[advBiome(m)], G = advGoals(), gd = G.list.filter(g => g.done).length, R = S.ride || {};
