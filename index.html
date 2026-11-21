@@ -14192,7 +14192,8 @@ function arcBestDefense(mType) {
 function typeEff(atk, defTypes) {
   /* LOCKED: the real type chart (2×, ½×, 0×). Do not soften. */
   const r = TC[atk]; let m = 1;
-  for (const d of defTypes) { if (r.none.has(d)) m *= 0; else if (r.sup.has(d)) m *= 2; else if (r.weak.has(d)) m *= 0.5; }
+  const inv = typeof ADV_INV !== 'undefined' && ADV_INV.on;   /* Tower Inverse Floor: every matchup flipped (immune → super effective) */
+  for (const d of defTypes) { if (r.none.has(d)) m *= inv ? 2 : 0; else if (r.sup.has(d)) m *= inv ? 0.5 : 2; else if (r.weak.has(d)) m *= inv ? 2 : 0.5; }
   return m;
 }
 const TYPE_COLOR = { fire:'#e0702a', water:'#3f7fe0', flying:'#8a78d8', dragon:'#5a3ae0', dark:'#5b4a3e', normal:'#9a9a78', grass:'#4f9e32', electric:'#c9a312', ice:'#3fb0b0', fighting:'#b23a30', poison:'#9040a0', ground:'#b8964a', psychic:'#e0507a', bug:'#8a9a18', rock:'#a08838', ghost:'#6a5598', steel:'#8a8aa8', fairy:'#d77aa0' };
@@ -29796,7 +29797,7 @@ function advCardImg() { const S = ADV.S, R = advRec(), h = ADV_HEROES.find(x => 
 /* ---------- shiny & alpha wild Pokémon (Legends-style): they don't despawn — they wait on their floor until you beat, catch or lose them ---------- */
 const ADV_SHINY_BASE = 4096, ADV_SHINY_CHARM = 1024, ADV_ALPHA_RATE = 60, ADV_ALPHA_FLOOR = 10, ADV_ALPHA_K = 1.6;
 const advShinyCharm = () => advVip() || (ADV.S.top || 0) >= 100;
-const advShinyRoll = () => Math.random() < 1 / (advShinyCharm() ? ADV_SHINY_CHARM : ADV_SHINY_BASE);
+const advShinyRoll = () => Math.random() < (advTwist() === 'lucky' ? 5 : 1) / (advShinyCharm() ? ADV_SHINY_CHARM : ADV_SHINY_BASE);
 const advMark = p => `${p && p.sh ? ' <b style="color:#ffe066">✨</b>' : ''}${p && p.al ? ' <b style="color:#ff5a5a">👑α</b>' : ''}${p && p.tot ? ' <b style="color:#ffd166">🌟Totem</b>' : ''}`;
 function advKeepSync(m) { const S = ADV.S; m = m || ADV.m; if (!m) return; S.keepR = S.keepR || {}; const L = ADV.roam.filter(q => q.sh || q.al).map(q => ({ id:q.id, lv:q.lv, x:q.x, y:q.y, sh:!!q.sh, al:!!q.al, fix:!!q.fix })); if (L.length) S.keepR[m.id] = L; else delete S.keepR[m.id]; }
 function advKeepRestore(m) { const L = (ADV.S.keepR || {})[m.id]; if (!L) return; for (const k of L) { if (ADV.roam.some(q => q.x === k.x && q.y === k.y)) continue; try { ensureSprite(k.id); if (k.sh) ensureShiny(k.id); } catch (e) {} ADV.roam.push(Object.assign({ px:k.x, py:k.y, dir:'d', t:1, born:1 }, k)); } }
@@ -29939,7 +29940,7 @@ function a3ItemBall() { const c = document.createElement('canvas'); c.width = c.
   mesh.position.y = 0.22; mesh.rotation.x = -0.35; g.add(mesh); a3Shadow(g, 0.18);
   const draw = () => { const x = c.getContext('2d'); x.imageSmoothingEnabled = false; x.drawImage(ADV.iconImg, ADV_ICON.keys.indexOf('pokeball') * 24, 0, 24, 24, 0, 0, 24, 24); tex.needsUpdate = true; };
   if (!ADV.iconImg) { ADV.iconImg = new Image(); ADV.iconImg.src = ADV_ICON.src; } if (ADV.iconImg.complete && ADV.iconImg.naturalWidth) draw(); else ADV.iconImg.addEventListener('load', draw, { once:true }); return { g }; }
-function advTalk(o) { const e = o.e, who = e.name, S = ADV.S; ADV.sp = o; if (e.t === 'mon') { ADV.sp = null; o.face = { u:'d', d:'u', l:'r', r:'l' }[ADV.dir] || o.face; try { if (typeof playCry === 'function') playCry(e.mon); } catch (er) {} return advSay(advPages(e.text || `${ROSTER[e.mon] ? ROSTER[e.mon].name : 'It'} looks happy to see you!`)); } if (e.t === 'item') { ADV.sp = null; return advPickItem(ADV.m, e); }
+function advTalk(o) { const e = o.e, who = e.name, S = ADV.S; ADV.sp = o; if (e.visit) { advFaceEach(o); return advVisitTalk(o); } if (e.t === 'mon') { ADV.sp = null; o.face = { u:'d', d:'u', l:'r', r:'l' }[ADV.dir] || o.face; try { if (typeof playCry === 'function') playCry(e.mon); } catch (er) {} return advSay(advPages(e.text || `${ROSTER[e.mon] ? ROSTER[e.mon].name : 'It'} looks happy to see you!`)); } if (e.t === 'item') { ADV.sp = null; return advPickItem(ADV.m, e); }
   if (e.t === 'sign') return advSay(advPages(e.text || '…'));
   if (e.t === 'legend') return advLegendMeet(o);
   if (e.t === 'evdummy') { ADV.sp = null; const lv = Math.min(advCap(), Math.max(...S.party.map(q => q.lv))); return advSay([`Training ${ADV_STAT_NAME[e.evStat]}! Win to give every Pokémon that battles +32 ${ADV_STAT_NAME[e.evStat]} EVs.`], () => advBattle('trainer', [{ id:e.mon, lv }], { o }));; }
@@ -29991,11 +29992,11 @@ function advTryStep(d) {
   const F = ADV.fol; F.fx = F.x; F.fy = F.y; F.x = ADV.x; F.y = ADV.y; F.dir = F.x > F.fx ? 'r' : F.x < F.fx ? 'l' : F.y < F.fy ? 'u' : 'd';
   ADV.stepN = (ADV.stepN || 0) + 1; ADV.sx = ADV.x; ADV.sy = ADV.y; ADV.x = tx; ADV.y = ty; ADV.moving = 1; ADV.jump = jump; ADV.mt = 0; ADV.dur = jump ? 0.36 : ADV.run ? 0.1 : 0.18; if (!jump && advRiding()) ADV.dur = 0.18 / ADV_MOUNTS[ADV.S.ride.on].sp;
 }
-function advArrive() { advGoal('steps'); const e = advEvAt(ADV.m, ADV.x, ADV.y); if (e && e.t === 'hint') advTip('h:' + ADV.m.id + ':' + e.x + ':' + e.y, e.text || '…', true);
+function advArrive() { advGoal('steps'); try { advEggStep(); } catch (e) {} const e = advEvAt(ADV.m, ADV.x, ADV.y); if (e && e.t === 'hint') advTip('h:' + ADV.m.id + ':' + e.x + ':' + e.y, e.text || '…', true);
   if (e && e.t === 'warp') { const t = advMapById(e.to); if (t) { advTeleport(t, e.tx, e.ty); return; } }
   advSeeStairs(); advSpot(); advKcCheck(); }
 /* ---------- Tower of Gods: floors, rest area, sealed stairs, Rotom Elevator ---------- */
-function advTeleport(t, x, y) { advFade(0.45); ADV.legendAway = {}; ADV.visit = null; ADV.m = t; ADV.x = ADV.px = x; ADV.y = ADV.py = y; Object.assign(ADV.fol, { x, y, px:x, py:y }); ADV.roam = []; ADV.roamT = 1.5; advBuildObjs();
+function advTeleport(t, x, y) { try { advSpeedCheck(t); } catch (e) {} advFade(0.45); ADV.legendAway = {}; ADV.visit = null; ADV.m = t; ADV.x = ADV.px = x; ADV.y = ADV.py = y; Object.assign(ADV.fol, { x, y, px:x, py:y }); ADV.roam = []; ADV.roamT = 1.5; advBuildObjs();
   for (const w of advWild(t)) try { ensureSprite(w.id); } catch (er) {} advFloorIn(true); advSave(); }
 /* the Tower's Ground Floor: the map marked as Rest Area, else the one named "Ground Floor", else the map the stairs of Floor 1 lead down to */
 const advRestMap = () => ADV.P.maps.find(q => q.rest) || ADV.P.maps.find(q => !(q.floor > 0) && /ground\s*floor/i.test(q.name || '')) || (() => { const f1 = ADV.P.maps.find(q => q.floor === 1), w = f1 && f1.ev.find(e => e.t === 'warp' && !((advMapById(e.to) || {}).floor > 0)); return w ? advMapById(w.to) : null; })();
@@ -30243,6 +30244,37 @@ function advSptOf(name) { const X = ADV.P && ADV.P.spx, n = String(name).toLower
   const ks = Object.keys(X).filter(sp => X[sp][1] && X[sp][1].toLowerCase() === n);   /* a key character with several sprites: one is picked per save and kept */
   if (ks.length) { const S = ADV.S; S.sprPick = S.sprPick || {}; if (!ks.includes(String(S.sprPick[n]))) S.sprPick[n] = +ks[Math.floor(Math.random() * ks.length)]; return +S.sprPick[n]; } const L0 = Object.keys(X).filter(sp => !X[sp][1] && String(X[sp][0]).toLowerCase() === n), BW = L0.filter(sp => +sp >= 1000), L = BW.length ? BW : L0; return L.length ? +L[Math.floor(Math.random() * L.length)] : null; }   /* BW sprites first */
 const KC_FULL6 = ['blue4', 'red', 'leon', 'volo3'];   /* only the last, biggest battles use a full team of 6; other key characters bring up to 5 */
+/* ================= the investigation: Oak senses something wrong in the Tower; the villains answer to someone; Volo plays the harmless merchant ================= */
+const ADV_KC_HINT = { giovanni:'Hmph. Enjoy your little win. Our benefactor will deal with you personally.', cyrus:'He promised me a world without spirit. I merely follow the plan.',
+  ghetsis:'Fool! You think *I* lead here? Even I was… invited.', lysandre:'The man in white sees a more beautiful world than even I. You cannot stop what he has begun.',
+  rose:'Even I was offered a deal I couldn\'t refuse. Such a charming fellow…', maxie:'The one who brought us here… he spoke of a god older than Groudon.', archie:'That smiling merchant fella said this\'d be easy. Bah!' };
+for (const [id, h] of Object.entries(ADV_KC_HINT)) { const k = ADV_KC.find(q => q.id === id); if (k) k.lose = (k.lose || '') + '\n\n' + h; }
+{ const V = id => ADV_KC.find(q => q.id === id), v1 = V('volo1'), v2 = V('volo2'), v3 = V('volo3');
+  if (v1) v1.scene = "Oh! Hello there, fellow traveller. Volo, at your service — I'm just a humble merchant.\n\nI heard the most frightening rumour… villains from every region, all here in the Tower! Do be careful, friend.\n\nThey say a god sleeps at the top of this Tower. Wouldn't you love to meet it?";
+  if (v2) v2.scene = "Ah, we meet again! You've climbed so far.\n\nI saw that Giovanni fellow earlier, scowling at everyone. How frightening! Whoever could have brought such people here?\n\nTell me… have you seen any trace of the Distortion World up here? No? Pity.";
+  if (v3) v3.say = "Thank you for climbing so far. You've opened the way for me.\n\nGiovanni, Cyrus, Ghetsis… they all came because I asked. A smile and a promise — people are so easy to move.\n\nThe god at the top will answer to ME. Out of my way!"; }
+const ADV_VILLAINS = ['giovanni', 'maxie', 'archie', 'cyrus', 'ghetsis', 'lysandre', 'rose'];
+const ADV_OAK_CALLS = [
+  { id:'anomaly', when:f => f >= 10, lines:['Ah, there you are! Can you hear me?', 'My instruments are picking up strange distortions inside the Tower. Space itself seems… bent.', 'It may be nothing. But keep your eyes open, and call me if you see anything odd.'] },
+  { id:'villain', when:() => ADV_VILLAINS.some(v => ADV.S.kc && ADV.S.kc.done[v]), lines:['I heard you ran into one of those villains! Are you all right?', 'Strange… groups like that never work with outsiders. Yet here they are, in the same Tower.', 'Someone must have brought them here. But who, and why?'] },
+  { id:'strings', when:f => f >= 50, lines:['Every villain from every region… gathered in one place.', 'That is no coincidence. Someone is pulling the strings — someone they all trust.', 'Be careful who you trust up there.'] },
+  { id:'legend', when:f => f >= 75, lines:['I\'ve been digging through old records. The distortion matches an ancient Sinnoh legend.', 'A man from long ago who sought the god of creation… and tried to tear open the Distortion World to reach it.', 'He was said to travel as a… merchant. Hm. Probably just an old story.'] },
+  { id:'static', when:f => f >= 90 && !(ADV.S.kc && ADV.S.kc.done.volo3), glitch:1, lines:['…kzzt… can you… hear me? …the readings… kzzt…', '…they\'re centred on… someone you\'ve already met… kzzt…', '…don\'t trust… the merch—', '*click* — The call was cut off.'] },
+  { id:'end', when:() => ADV.S.kc && ADV.S.kc.done.volo3, lines:['You did it! The distortions are gone — the Tower is quiet at last.', 'Volo… the humble merchant all along. He fooled every one of us.', 'Rest now, Champion. You\'ve earned it. …And thank you.'] } ];
+function advOakCheck() { const S = ADV.S, m = ADV.m; if (!S || !m || !(m.floor > 0) || !S.hero) return; S.oak = S.oak || {}; const c = ADV_OAK_CALLS.find(c => !S.oak[c.id] && c.when(m.floor)); if (!c) return;
+  let tries = 0; const go = () => { if (ADV.m !== m) return; if (ADV.B || ADV.msg || ADV.panel || ADV.catch || ADV.spot || ADV.fx || ADV.moving) { if (++tries < 20) setTimeout(go, 800); return; } S.oak[c.id] = 1; advSave(); advOakCall(c); };
+  setTimeout(go, 2500); }
+function advOakCall(c) { let el = document.getElementById('advCall'); if (!el) { el = document.createElement('div'); el.id = 'advCall';
+    el.style.cssText = 'position:absolute;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;background:#0008';
+    el.innerHTML = `<div style="width:min(300px,86vw);background:linear-gradient(#1f2547,#0f1226);border:2px solid #fff3;border-radius:28px;padding:16px 18px;text-align:center;color:#fff;font-family:system-ui;box-shadow:0 10px 40px #000a">
+      <div style="font-size:12px;opacity:.7;letter-spacing:.08em">📱 ROTOM PHONE · INCOMING CALL</div><div class="cr" style="width:84px;height:84px;margin:10px auto;border-radius:50%;background:radial-gradient(circle,#ffffff22,#ffffff08);display:flex;align-items:flex-end;justify-content:center;overflow:hidden;animation:advRing 1s infinite"><img alt="" style="height:78px;image-rendering:pixelated"></div>
+      <div style="font:900 20px system-ui">Prof. Oak</div><div class="cs" style="font-size:13px;opacity:.75;margin:2px 0 16px">calling…</div>
+      <button style="width:100%;padding:12px;border:0;border-radius:999px;background:#22c55e;color:#fff;font:900 16px system-ui">📞 Answer</button></div><style>@keyframes advRing{0%,100%{transform:rotate(0)}10%{transform:rotate(-8deg)}20%{transform:rotate(8deg)}30%{transform:rotate(-6deg)}40%{transform:rotate(0)}}</style>`;
+    document.getElementById('adv').appendChild(el); el.querySelector('img').src = avURL('oak-gen3'); }
+  el.style.display = 'flex'; el.querySelector('.cs').textContent = c.glitch ? 'calling… (weak signal)' : 'calling…'; ADV.hold = null; ADV.panel = 'call';
+  const ring = setInterval(() => { try { SFX.click(); advVibe([120, 80, 120]); } catch (e) {} }, 900);
+  el.querySelector('button').onclick = () => { clearInterval(ring); el.style.display = 'none'; ADV.panel = null; try { SFX.click(); } catch (e) {}
+    advSay(c.lines.map(t => ({ t, who:c.glitch && /click/.test(t) ? '' : 'Prof. Oak' }))); }; }
 function advKcEv(k, f) { const P = advPast(k.id); if (P) k = Object.assign({}, k, P); const lv = advFlLv(f), team = (k.team || []).filter(id => ROSTER[advMonKey(id)]).slice(KC_FULL6.includes(k.id) ? -6 : -5), n = team.length;
   return { t:'trainer', kc:k.id, name:k.name, spr:advSptOf(k.name) ?? (k.name === 'Volo' && !(ADV.P.spx || {})[1188] ? 1188 : null) ?? (k.spr != null ? k.spr : advSptOf(k.kind === 'villain' ? 'Rocket Grunt' : 'Ace Trainer') ?? 1049), face:'down', vanish:'vanish', scene:k.scene,
     team:team.map((id, i) => `${id}:${Math.min(100, lv + 3 + (i === n - 1 ? 2 : i >= n - 3 ? 1 : 0))}`).join(','),
@@ -30261,9 +30293,85 @@ function advKcObjs() { const S = ADV.S, m = ADV.m; advKcInit(); advRoamInit(); a
     e.before = e.past ? `${ADV.S.name || 'You'}… we're not finished. Not after ${KC_REGION[(ADV_HEROES.find(x => x.k === S.hero) || {}).gen] || 'last time'}!` : `${k.name}: Back for more? Good. This time, finish it!`; ADV.objs.push({ e, key:'kc:' + id, x:w.x, y:w.y, px:w.x, py:w.y, face:'d', lookT:1 }); }
   if (fresh) { ADV.kcTrig = null; const k = advKcList().find(k => !advIsChal(k.id) && S.kc.plan[k.id] === m.floor && !S.kc.done[k.id] && !S.kc.wait[k.id] && (k.after || []).every(a => S.kc.done[a] || !advKcById(a)));
     if (k && k.id !== 'volo3') { const t = advFarTile(Math.min(14, Math.floor((m.w + m.h) / 5))); ADV.kcTrig = { id:k.id, x:t.x, y:t.y }; } }
-  advTop100(); advChalObjs();
+  advTop100(); advChalObjs(); try { advVisitObjs(fresh); if (fresh) { advTwistEnter(); advOakCheck(); } } catch (e) {}
   if (S.myth) for (const [id, f] of Object.entries(S.myth)) { if (f !== m.floor || ADV.legendAway['myth:' + id]) continue; const p = ADV.visit.myth[id] || (ADV.visit.myth[id] = advFarTile(8));
     const e = { t:'legend', mon:id, lv:(S.mythLv && S.mythLv[id]) || Math.min(100, advFlLv(m.floor) + 2), run:1, myth:1, text:`${ROSTER[id].group === 'mythical' ? 'A mythical' : 'A legendary'} Pokémon… ${ROSTER[id].name} is here!` }; ADV.objs.push({ e, key:'myth:' + id, x:p.x, y:p.y, px:p.x, py:p.y, face:'d', lookT:1 }); } }
+/* ================= Floor twists & visitors (change every week, so no two climbs feel the same) ================= */
+const ADV_TWISTS = {
+  rain:{ ic:'🌧️', n:'Rain Floor', d:'Endless rain in every battle here. Water moves ×1.5, Fire moves ×½.', w:'rain' },
+  sun:{ ic:'☀️', n:'Drought Floor', d:'Harsh sunlight in every battle here. Fire moves ×1.5, Water moves ×½.', w:'sunny' },
+  sand:{ ic:'🌪️', n:'Sandstorm Floor', d:'A sandstorm rages in every battle. Rock moves ×1.5, and anything not Rock, Ground or Steel takes chip damage.', w:'sandstorm' },
+  hail:{ ic:'🌨️', n:'Hailstorm Floor', d:'Hail falls in every battle. Ice moves ×1.5, and anything not Ice takes chip damage.', w:'hail' },
+  inverse:{ ic:'🔄', n:'Inverse Floor', d:'Type matchups are flipped! Super effective becomes not very effective — and immunities become weaknesses.' },
+  dark:{ ic:'🌑', n:'Darkness Floor', d:'The lights are out. You can only see a little way around you.' },
+  gold:{ ic:'💰', n:'Gold Rush Floor', d:'Double prize money and double EXP from every battle here.' },
+  lucky:{ ic:'🍀', n:'Lucky Floor', d:'Shiny Pokémon are 5× more likely to appear here.' },
+  power:{ ic:'💪', n:'Power Floor', d:'Every wild Pokémon and trainer here is 3 levels higher — and gives ×1.5 EXP.' },
+  speed:{ ic:'⏱️', n:'Speed Run Floor', d:'Reach the stairs up within 3 minutes for a prize!' } };
+const advRand = (...k) => { let h = 2166136261; for (const c of k.join('|')) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296; };   /* same answer all week */
+function advTwist(m) { m = m || ADV.m; if (!m || !(m.floor >= 3) || m.sky || m.rest || advLegFloor(m.floor)) return null; const w = advWeek();
+  if (advRand(w, m.floor, 'tw') > 0.35) return null; const K = Object.keys(ADV_TWISTS); return K[Math.floor(advRand(w, m.floor, 'tk') * K.length)]; }
+const advTw = k => advTwist() === k;
+/* announced on arrival, and a small pill stays on screen while you're on the floor */
+function advTwistHud() { let el = document.getElementById('advTwP'); const on = ADV.onMap && ADV.m && !ADV.B && !document.getElementById('adv').hidden, k = on ? advTwist() : null;
+  if (!k) { if (el) el.hidden = true; return; } if (!el) { el = document.createElement('div'); el.id = 'advTwP'; el.style.cssText = 'position:absolute;top:calc(env(safe-area-inset-top,0px) + 62px);right:10px;z-index:7;background:#1d1b38e6;color:#fff;border:2px solid #ffd54a;border-radius:999px;padding:4px 12px;font:800 12px system-ui;pointer-events:auto;cursor:pointer'; el.onclick = () => { const T = ADV_TWISTS[advTwist()]; if (T) advSay([`${T.ic} ${T.n}`, T.d]); }; document.getElementById('adv').appendChild(el); }
+  const T = ADV_TWISTS[k]; let t = `${T.ic} ${T.n}`; if (k === 'speed' && ADV.speed && ADV.speed.f === ADV.m.floor && !ADV.speed.done) { const left = Math.max(0, 180 - (performance.now() - ADV.speed.t0) / 1000); t += ` · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`; }
+  el.hidden = false; if (el.textContent !== t) el.textContent = t; }
+setInterval(() => { try { advTwistHud(); } catch (e) {} }, 250);
+function advTwistEnter() { const k = advTwist(); if (!k) return; const T = ADV_TWISTS[k]; ADV.speed = k === 'speed' ? { f:ADV.m.floor, t0:performance.now() } : null;
+  try { SFX.warn ? SFX.warn() : SFX.click(); } catch (e) {} setTimeout(() => { if (!ADV.msg && !ADV.B) advSay([`${T.ic} ${T.n}!`, T.d]); }, 700); }
+/* speed run: reaching the next floor in time pays out */
+function advSpeedCheck(to) { const s = ADV.speed; if (!s || s.done || !ADV.m || ADV.m.floor !== s.f || !(to && to.floor === s.f + 1)) return; s.done = 1; const sec = (performance.now() - s.t0) / 1000;
+  if (sec <= 180) { const pz = 400 * s.f; ADV.S.money += pz; ADV_HUD.sig = null; setTimeout(() => advSay([`⏱️ Speed run cleared in ${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}!`, `You earned ₽${pz.toLocaleString()}!`]), 900); }
+  else setTimeout(() => toast('⏱️ Too slow for the speed-run prize this time'), 900); }
+/* darkness: only a small circle of light around you */
+function advDarkness(ctx, scr, W, H) { const a = scr(ADV.px + 0.5, 0.6, ADV.py + 0.5), b = scr(ADV.px + 1.5, 0.6, ADV.py + 0.5), t = Math.max(8, Math.abs(b.x - a.x)), R = t * 2.6;
+  const g = ctx.createRadialGradient(a.x, a.y, R * 0.35, a.x, a.y, R); g.addColorStop(0, 'rgba(4,4,12,0)'); g.addColorStop(1, 'rgba(4,4,12,0.95)'); ctx.save(); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+/* battle side: weather that lasts all battle, the inverse chart, and an occasional extra level */
+const ADV_INV = { on:false };
+function advTwistBattle() { if (!game.match || !game.match.adv) return; const k = advTwist(); ADV_INV.on = k === 'inverse'; if (game.match._tw) return; game.match._tw = 1;
+  const T = k && ADV_TWISTS[k]; if (T && T.w) { try { setWeather(T.w, true); if (weatherState) weatherState.t = 1e9; } catch (e) {} } if (k === 'inverse') { try { banner('🔄 Inverse Battle!', '#c084fc', 1.4); } catch (e) {} } }
+
+/* ---- visitors: someone new waiting near the stairs on some floors ---- */
+const ADV_VISITORS = {
+  merchant:{ name:'Wandering Merchant', cls:['Gentleman', 'Rich Boy', 'Hiker'] },
+  egg:{ name:'Egg Collector', cls:['Pokémon Breeder', 'Breeder', 'Lady'] },
+  gamble:{ name:'Gambler', cls:['Gambler', 'Clown', 'Guitarist', 'Rocker'] },
+  shrine:{ name:'Shrine Keeper', cls:['Hex Maniac', 'Channeler', 'Psychic', 'Medium'] } };
+const ADV_EGG_POOL = ['dratini', 'larvitar', 'bagon', 'beldum', 'gible', 'riolu', 'eevee', 'togepi', 'deino', 'goomy', 'jangmoo', 'dreepy', 'frigibax', 'axew', 'munchlax', 'pichu', 'charmander', 'bulbasaur', 'squirtle', 'chikorita', 'cyndaquil', 'totodile', 'treecko', 'torchic', 'mudkip', 'ralts', 'trapinch', 'snorunt', 'shinx', 'larvesta', 'zorua', 'litwick'];
+function advVisitor(m) { m = m || ADV.m; if (!m || !(m.floor >= 2) || m.floor >= 100 || m.sky || m.rest) return null; const w = advWeek(), S = ADV.S; S.vis = S.vis || {}; if (S.vis[w + ':' + m.floor]) return null;
+  if (advRand(w, m.floor, 'vi') > 0.22) return null; const K = Object.keys(ADV_VISITORS); return K[Math.floor(advRand(w, m.floor, 'vk') * K.length)]; }
+function advNearTile(min, max) { const m = ADV.m, W = m.w, D = new Int32Array(W * m.h).fill(-1), q = [ADV.y * W + ADV.x], ok = []; D[q[0]] = 0;
+  for (let h = 0; h < q.length; h++) { const i = q[h], x = i % W, y = (i / W) | 0, d = D[i]; if (d >= min && d <= max && !advObjAt(x, y) && !advEvAt(m, x, y)) ok.push({ x, y }); if (d >= max) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= m.h) continue; const j = ny * W + nx; if (D[j] >= 0 || !advWalkable(m, nx, ny)) continue; D[j] = d + 1; q.push(j); } }
+  return ok.length ? ok[Math.floor(Math.random() * ok.length)] : null; }
+function advVisitObjs(fresh) { const k = advVisitor(); if (!k) return; const V = ADV_VISITORS[k], m = ADV.m; ADV.visit = ADV.visit || { map:m.id, myth:{} };
+  if (fresh || !ADV.visit.vt) { const t = advNearTile(2, 4); if (!t) return; ADV.visit.vt = t; } const t = ADV.visit.vt; if (advObjAt(t.x, t.y)) return;
+  const volo = k === 'merchant' && advRand(advWeek(), m.floor, 'volo') < 0.4 && !(ADV.S.kc && ADV.S.kc.done.volo3), vk = volo && ADV_KC.find(q => q.id === 'volo1');
+  const spr = (volo && ((vk && vk.spr) ?? advSptOf('Volo'))) ?? V.cls.map(c => advSptOf(c)).find(v => v != null) ?? advSptOf('Ace Trainer') ?? 1049;
+  ADV.objs.push({ e:{ t:'npc', name:volo ? 'Volo' : V.name, spr, visit:k, volo, face:'d' }, key:'visit:' + k, x:t.x, y:t.y, px:t.x, py:t.y, hx:t.x, hy:t.y, face:'d', lookT:1 + Math.random() * 2, wT:9 }); }
+function advVisitDone() { const S = ADV.S; S.vis = S.vis || {}; S.vis[advWeek() + ':' + ADV.m.floor] = 1; ADV.objs = ADV.objs.filter(o => !(o.e && o.e.visit)); advSave(); }
+function advVisitTalk(o) { const k = o.e.visit, S = ADV.S, f = ADV.m.floor;
+  if (k === 'merchant' && o.e.volo) return advSay([{ t:'Oh! It\'s you again, my friend! Running low on supplies? For you, a very special price.', who:'Volo' }, { t:'Such a dangerous place, this Tower… I do worry about you!', who:'Volo' }], () => advMart(['ultraball', 'rarecandy', 'maxrevive', 'fullrestore', 'maxpotion', 'fullheal']));
+  if (k === 'merchant') return advSay(['Wandering Merchant: Psst! Rare goods, and I\'m only on this floor this week.'], () => advMart(['ultraball', 'rarecandy', 'maxrevive', 'fullrestore', 'maxpotion', 'fullheal']));
+  if (k === 'egg') { if (S.egg) return advSay(['Egg Collector: You\'re still carrying the last Egg I gave you! Keep walking — it\'ll hatch soon.']);
+    return advSay(['Egg Collector: I found this Egg deep in the Tower… but I can\'t look after it.', 'Would you take care of it?'], () => advAsk('Take the Mystery Egg?', ['Yes', 'No'], i => { if (i) return advSay(['Egg Collector: Oh… maybe someone else, then.']);
+      const pool = ADV_EGG_POOL.filter(id => ROSTER[id]); S.egg = { id:pool[Math.floor(Math.random() * pool.length)], steps:0, need:350 + Math.floor(Math.random() * 250) }; try { SFX.win(); } catch (e) {} advVisitDone(); advSay(['You received a Mystery Egg!', 'Egg Collector: Keep walking with it. It\'ll hatch before you know it!']); })); }
+  if (k === 'gamble') { const cost = 100 * Math.max(2, f);
+    return advSay(['Gambler: Feeling lucky? Three Poké Balls. One\'s a jackpot, one\'s a dud…', 'and one… well. Pick and see!'], () => advAsk(`Pay ₽${cost.toLocaleString()} to play?`, ['Play', 'No thanks'], i => { if (i) return advSay(['Gambler: Your loss!']); if (S.money < cost) return advSay(['Gambler: You can\'t afford it, kid.']);
+      S.money -= cost; ADV_HUD.sig = null; advAsk('Pick a ball!', ['⚪ Left', '⚪ Middle', '⚪ Right'], () => { advVisitDone(); const r = Math.random(); try { SFX.click(); } catch (e) {}
+        if (r < 0.3) { const pz = cost * 4; S.money += pz; try { SFX.win(); } catch (e) {} return advSay(['💰 JACKPOT!', `You won ₽${pz.toLocaleString()}!`]); }
+        if (r < 0.55) { const L = [['rarecandy', 2], ['maxrevive', 1], ['ultraball', 5], ['fullrestore', 2]], [it, n] = L[Math.floor(Math.random() * L.length)]; S.bag[it] = (S.bag[it] || 0) + n; advSave(); try { SFX.win(); } catch (e) {} return advSay([`🎁 A prize! You got ${advItemName(it)} ×${n}!`]); }
+        if (r < 0.8) return advSay(['…The ball was empty.', 'Gambler: Better luck next time!']);
+        const pool = Object.keys(ROSTER).filter(id => !['legendary', 'mythical'].includes(ROSTER[id].group) && ROSTER[id].stage !== 0), id = pool[Math.floor(Math.random() * pool.length)], mon = advMakeMon(id, Math.min(100, advFlLv(f) + 5));
+        advSay(['The ball bursts open — it\'s a Pokémon, and it\'s ANGRY!'], () => advBattle('wild', [{ mon, id:mon.id, lv:mon.lv }], { q:{ x:o.x, y:o.y } })); }); })); }
+  if (k === 'shrine') { const next = Object.entries(S.leg || {}).map(([fl, id]) => [+fl, id]).filter(([fl]) => fl > f && !advLegClear(fl)).sort((a, b) => a[0] - b[0])[0];
+    return advSay(['Shrine Keeper: This shrine is older than the Tower itself. Rest a moment, traveller.'], () => { for (const p of S.party) p.hp = 1; advVisitDone(); try { SFX.heal ? SFX.heal() : SFX.click(); } catch (e) {}
+      advSay(['✨ A warm light washes over your team. Your Pokémon are fully healed!', next && ROSTER[next[1]] ? `Shrine Keeper: …I sense ${ROSTER[next[1]].name}. It waits on Floor ${next[0]}.` : 'Shrine Keeper: The legends of this Tower… you have faced them all. Remarkable.']); }); } }
+/* the Mystery Egg hatches after enough steps */
+function advEggStep() { const S = ADV.S, E = S.egg; if (!E || ADV.B || ADV.msg) return; E.steps++; if (E.steps === Math.floor(E.need * 0.8)) toast('🥚 Your Mystery Egg is moving around!');
+  if (E.steps < E.need || !ROSTER[E.id]) return; S.egg = null; const mon = advMakeMon(E.id, 5); if (Math.random() < 4 / (advShinyCharm() ? ADV_SHINY_CHARM : ADV_SHINY_BASE)) mon.sh = true; ADV.hold = null;
+  advSay(['Oh?', 'Your Mystery Egg is hatching!'], () => { try { playCry && playCry(E.id); } catch (e) {} advAddMon(mon); advSave(); advSay([`${mon.sh ? '✨ ' : ''}${ROSTER[E.id].name} hatched from the Egg!`]); }); }
 /* the floor's legend stands in front of the stairs up and seals them until it's beaten or caught */
 const advLegKey = f => 'leg:' + f;
 /* a floor that has (or had) a floor legend: the legend is that floor's gatekeeper, so the builder's gatekeeper trainer stays away */
@@ -30356,7 +30464,7 @@ const advSkyAny = () => ADV.S.party.some(q => q.hp > 0 && advSkyOk(q.id));
 /* a Pokémon above your level cap won't battle for you yet (it keeps its level; raise the cap to use it) */
 const advOverCap = q => !!q && (q.lv || 1) > advCap();
 const advCanFight = q => q && q.hp > 0 && !advOverCap(q) && (!(ADV.B && ADV.B.sky) || advSkyOk(q.id));
-function advBattle(kind, foes, ctx) { ADV.swUsed = false; ADV.throwWait = 0; clearTimeout(ADV.throwT); ADV.swWait = 0; clearTimeout(ADV.swWT);
+function advBattle(kind, foes, ctx) { if (advTwist() === 'power' && kind !== 'legend') foes = foes.map(q => { const lv = Math.min(100, q.lv + 3); if (q.mon) q.mon.lv = lv; return Object.assign({}, q, { lv }); }); ADV.swUsed = false; ADV.throwWait = 0; clearTimeout(ADV.throwT); ADV.swWait = 0; clearTimeout(ADV.swWT);
   const S = ADV.S, sky = !!(kind === 'trainer' && ctx.o && ctx.o.e && ctx.o.e.sky), alive = S.party.findIndex(p => p.hp > 0 && !advOverCap(p) && (!sky || advSkyOk(p.id)));
   if (alive < 0 && S.party.some(p => p.hp > 0 && advOverCap(p)) && !S.party.some(p => p.hp > 0 && !advOverCap(p))) return advSay([`Your healthy Pokémon are above your level cap (Lv ${advCap()}) and won't battle yet!`, 'Heal a Pokémon at or below the cap, or raise the cap by beating floor bosses.']);
   if (alive < 0) return advSay(['Your Pokémon are too tired to battle!', 'Heal them at a Pokémon Center.']);
@@ -30489,7 +30597,7 @@ function advPickNext(was, cb) { const S = ADV.S, d = document.createElement('div
     ${S.party.map((q, i) => advCanFight(q) ? card(q, i) : '').join('')}</div>`;
   d.onclick = e => { const b = e.target.closest('button[data-i]'); if (!b) return; try { SFX.click(); } catch (er) {} d.remove(); cb(+b.dataset.i); }; document.body.appendChild(d); }
 function advRunAway() { const B = ADV.B; if (!B) return; $('#over').hidden = true; try { const p = game.player; if (p) ADV.S.party[B.pi].hp = Math.max(0.01, p.hp / p.maxHp); } catch (e) {} advEndBattle(B.kind !== 'trainer' ? 'ran' : 'lose'); }
-function advEndBattle(out) {
+function advEndBattle(out) { ADV_INV.on = false;
   const B = ADV.B; if (out === 'caught' && B) try { advGainXp(B.foes[B.fi]); } catch (e) {} game.mode = 'over'; game.match = null; ADV.B = null;
   setTimeout(() => {   /* unstage only now, right as the field comes back — before, the plain battle arena flashed up for a moment */
     a3Unstage(); $('#over').hidden = true; advShow(); advFade(0.6); ADV.calm = 3;
@@ -30528,7 +30636,7 @@ function advEndRest2(out, B) {
       ADV.catch = { id:e.mon, lv:Math.max(1, Math.min(100, +e.lv || 50)), mon:null, x:o.x, y:o.y, tries:3, anim:null, legend:{ o, flee, caught } }; advCatchUI();
       advSay([`${nm} fainted!`, ...B.log, 'Now\'s your chance — throw a Poké Ball before it recovers!']); }
     else if (B.kind === 'wild') { const q = B.ctx.q, w = B.foes[0]; ADV.catch = { id:w.id, lv:w.lv, mon:w, x:q.x, y:q.y, tries:3, anim:null }; advCatchUI(); advTip('catch', 'It fainted! Throw as many Poké Balls as you like. Better balls catch more easily, and legendaries are hard!'); advSay([`The wild ${ROSTER[w.id].name} fainted!`, ...B.log, 'Throw a Poké Ball to catch it!']); }
-    else { const o = B.ctx.o, e = o.e; if (!e.evStat) S.beaten[o.key] = 1; const pz = advPrize(e.prize); S.money += pz; const capM = advRaiseCap(e.cap); ADV.sp = o;
+    else { const o = B.ctx.o, e = o.e; if (!e.evStat) S.beaten[o.key] = 1; const pz = advPrize(e.prize) * (advTwist() === 'gold' ? 2 : 1); S.money += pz; const capM = advRaiseCap(e.cap); ADV.sp = o;
       const kw = e.kc ? advKcWin(o) : [];
       advSay([...advPages(e.lose, e.name || 'Trainer'), pz ? `You got ₽${pz.toLocaleString()} for winning!${advVip() ? ' 👑' : ''}` : '', ...kw, capM, ...B.log], () => { if (e.vanish === 'vanish') { advFade(0.3); ADV.objs = ADV.objs.filter(q => q !== o); } }); }
     advSave();
@@ -30791,6 +30899,7 @@ function advFrame(now) {
   const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect(), W = Math.round(r.width * dpr), H = Math.round(r.height * dpr); if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, W, H); const flat = advIs2D(); A2.dpr = dpr; if (flat) a2Draw(ctx, W, H);
   const scr = flat ? a2Scr : (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(A3.cam); return { x:(v.x + 1) / 2 * W, y:(1 - v.y) / 2 * H }; };
+  if (advTwist() === 'dark') advDarkness(ctx, scr, W, H);
   const sz = (() => { const a = scr(ADV.px + 0.5, 0, ADV.py + 0.5), b = scr(ADV.px + 1.5, 0, ADV.py + 0.5); return Math.max(8, b.x - a.x); })(), z = sz / 16;
   const C = ADV.catch;
   if (C && !(C.anim && C.anim.ok && C.anim.t > 0.55)) { const q = scr(C.x + 0.5, 1.1, C.y + 0.5); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#0008'; ctx.lineWidth = 3; ctx.font = `bold ${sz * 0.45}px system-ui`; ctx.textAlign = 'center'; ctx.strokeText('z z', q.x + sz * 0.4, q.y + Math.sin(ADV.time * 3) * 3); ctx.fillText('z z', q.x + sz * 0.4, q.y + Math.sin(ADV.time * 3) * 3); }
@@ -31262,7 +31371,7 @@ function advStats(m) { const b = ROSTER[m.id].base, L = m.lv, N = ADV_NAT[m.nat]
 function advLocks(moves, lv) { const order = moves.map((m, i) => [m && m.power > 0 ? m.power : 1e6, i]).sort((a, b) => a[0] - b[0]), lock = [0, 0, 0, 0];
   order.forEach(([, i], rank) => { lock[i] = lv >= ADV_UNLOCK[rank] ? 0 : ADV_UNLOCK[rank]; }); return lock; }
 /* after every beginMatch: real stats for this level, level-based damage, locked move slots */
-function advApplyLv() { const B = ADV.B; if (!B) return;
+function advApplyLv() { try { advTwistBattle(); } catch (e) {} const B = ADV.B; if (!B) return;
   const put = (F, m) => { if (!F || !m) return; const ratio = F.maxHp > 0 ? F.hp / F.maxHp : 1, st = advStats(m); F.stats = st; F.advLv = m.lv; F.advG = m.g; F.maxHp = Math.max(1, Math.round(st.hp * HP_MULT[game.len])); F.hp = Math.max(1, Math.round(F.maxHp * ratio)); F.advLock = advLocks(F.moves, m.lv); };
   put(game.player, ADV.S.party[B.pi]); put(game.foe, B.foes[B.fi]);
   for (const [F, m] of [[game.player, ADV.S.party[B.pi]], [game.foe, B.foes[B.fi]]]) { if (!F || !m) continue; F.advSh = !!m.sh; F.advAl = !!m.al; F.advTot = !!m.tot; if (m.sh && !F.shiny) try { makeShiny(F); } catch (e) {} }
@@ -31275,7 +31384,7 @@ function advApplyLv() { const B = ADV.B; if (!B) return;
   if (B.kc && game.foe && B.fi === B.foes.length - 1 && B.foes.length > 1) { const r = game.foe.hp / game.foe.maxHp; game.foe.maxHp = Math.round(game.foe.maxHp * 1.5); game.foe.hp = Math.max(1, Math.round(game.foe.maxHp * r)); if (!B.aceT) { B.aceT = 1; setTimeout(() => { try { banner(`🔥 ACE · ${ROSTER[game.foe.id].name}`, '#ff6b6b', 1.4); } catch (e) {} }, 500); } }
   if (B.kind === 'legend' && game.foe) { const r = game.foe.hp / game.foe.maxHp; game.foe.maxHp *= 2; game.foe.hp = Math.max(1, Math.round(game.foe.maxHp * r)); }   /* boss: double HP */ }
 function advGainXp(foe) { const B = ADV.B, S = ADV.S, b = ROSTER[foe.id].base, bst = ADV_STATS.reduce((a, k) => a + b[k], 0);
-  const base = Math.max(1, Math.floor(bst * 0.35 * foe.lv / 7 * (B.kind === 'trainer' ? 1.5 : 1))), top = ADV_STATS.reduce((a, k) => b[k] > b[a] ? k : a, 'hp');
+  const base = Math.max(1, Math.floor(bst * 0.35 * foe.lv / 7 * (B.kind === 'trainer' ? 1.5 : 1) * (advTwist() === 'gold' ? 2 : advTwist() === 'power' ? 1.5 : 1))), top = ADV_STATS.reduce((a, k) => b[k] > b[a] ? k : a, 'hp');
   B.xp = B.xp || new Map();
   S.party.forEach((m, i) => { if (m.hp <= 0 && i !== B.pi) return; const part = B.part.has(i), share = !S.expOff, gain = advVip() ? base * 2 : part ? base : share ? Math.floor(base * 0.5) : 0; if (!gain) return; advFix(m);
     const capL = advCap(); if (m.lv >= capL) { if (part && !B.capMsg) { B.capMsg = 1; B.log.push(`${ROSTER[m.id].name} is at the level cap (Lv ${capL}) and can't gain EXP.`); } return; }
