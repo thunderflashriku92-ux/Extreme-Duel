@@ -24983,28 +24983,24 @@ if (settings.hazard == null) settings.hazard = 'off';
 if (settings.style == null) settings.style = 'balanced';
 
 /* ================= Menu BGM (your track) + Battle BGM (XY / arena) ================= */
-const MenuBGM = {
-  audio: null,
+const MenuBGM = {   /* the title screen plays the epic legendary theme; every other menu (character select…) keeps the original menu track */
+  audio: null, epic: null, menu: null,
   playing: false,
   init() {
-    if (this.audio) return;
-    let a = null; try { if (typeof ADV_MUSIC !== 'undefined' && ADV_MUSIC.legend) { a = new Audio(ADV_MUSIC.legend); a.preload = 'auto'; } } catch (e) {}   /* the epic legendary theme for the title and menus */
-    if (!a) a = document.getElementById('menuAudio');
-    if (!a) return;
-    a.volume = 0.5; a.loop = true;
-    this.audio = a;
+    if (this.menu) return;
+    const m = document.getElementById('menuAudio'); if (m) { m.volume = 0.5; m.loop = true; this.menu = m; }
+    try { if (typeof ADV_MUSIC !== 'undefined' && ADV_MUSIC.legend) { const e = new Audio(ADV_MUSIC.legend); e.preload = 'auto'; e.volume = 0.5; e.loop = true; this.epic = e; } } catch (er) {}
   },
+  pick() { const st = document.getElementById('start'), on = st && !st.hidden; return (on && this.epic) || this.menu || this.epic; },
   play() {
     if (!SFX.musicOn) return;
     this.init();
-    if (!this.audio) return;
+    const want = this.pick(); if (!want) return;
     try {
       BattleBGM.stop();
-      this.audio.loop = true;
-      if (this.audio.paused || !this.playing) {
-        this.audio.currentTime = 0;
-        this.audio.play().catch(() => {});
-      }
+      if (this.audio && this.audio !== want) { try { this.audio.pause(); } catch (e) {} this.playing = false; }
+      this.audio = want; want.loop = true;
+      if (want.paused || !this.playing) { want.currentTime = 0; want.play().catch(() => {}); }
       this.playing = true;
       SFX.music(null); // mute procedural while menu track plays
     } catch (e) {}
