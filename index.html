@@ -24988,7 +24988,8 @@ const MenuBGM = {
   playing: false,
   init() {
     if (this.audio) return;
-    const a = document.getElementById('menuAudio');
+    let a = null; try { if (typeof ADV_MUSIC !== 'undefined' && ADV_MUSIC.legend) { a = new Audio(ADV_MUSIC.legend); a.preload = 'auto'; } } catch (e) {}   /* the epic legendary theme for the title and menus */
+    if (!a) a = document.getElementById('menuAudio');
     if (!a) return;
     a.volume = 0.5; a.loop = true;
     this.audio = a;
